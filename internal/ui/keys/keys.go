@@ -94,12 +94,12 @@ func Default() KeyMap {
 			key.WithHelp("1", "files"),
 		),
 		Branches: key.NewBinding(
-			key.WithKeys("2"),
-			key.WithHelp("2", "branches"),
+			key.WithKeys("b"),
+			key.WithHelp("b", "branches"),
 		),
 		Log: key.NewBinding(
-			key.WithKeys("3"),
-			key.WithHelp("3", "log"),
+			key.WithKeys("2"),
+			key.WithHelp("2", "log"),
 		),
 		PrevView: key.NewBinding(
 			key.WithKeys("left"),
@@ -166,17 +166,17 @@ func DefaultConfirm() ConfirmKeyMap {
 
 // ShortHelp is the one-line hint shown in the footer.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Toggle, k.StageAll, k.Commit, k.Discard, k.DiscardAll, k.Open, k.Help, k.Quit}
+	return []key.Binding{k.Toggle, k.StageAll, k.Commit, k.Discard, k.DiscardAll, k.Open, k.Branches, k.Help, k.Quit}
 }
 
-// BranchHelp is the footer hint in the branch view.
+// BranchHelp is the footer hint while the branch list is open.
 func (k KeyMap) BranchHelp() []key.Binding {
-	return []key.Binding{k.Checkout, k.Files, k.Refresh, k.Help, k.Quit}
+	return []key.Binding{k.Checkout, k.Refresh, k.Back, k.Help}
 }
 
 // LogHelp is the footer hint in the log view.
 func (k KeyMap) LogHelp() []key.Binding {
-	return []key.Binding{k.Open, k.ScrollDown, k.ScrollUp, k.Focus, k.Help, k.Quit}
+	return []key.Binding{k.Open, k.Branches, k.ScrollDown, k.ScrollUp, k.Focus, k.Help, k.Quit}
 }
 
 // DiffHelp is the footer hint while a diff is shown fullscreen.
@@ -189,7 +189,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Focus, k.ScrollUp, k.ScrollDown, k.Open, k.Back},
 		{k.Toggle, k.StageAll, k.Discard, k.DiscardAll, k.Commit, k.Refresh},
-		{k.Files, k.Branches, k.Log, k.PrevView, k.NextView, k.Checkout, k.Help, k.Quit},
+		{k.Files, k.Log, k.PrevView, k.NextView, k.Branches, k.Checkout, k.Help, k.Quit},
 	}
 }
 

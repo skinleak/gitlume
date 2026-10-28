@@ -91,12 +91,12 @@ func script(s *session) {
 	}
 	s.frames[len(s.frames)-1].dur = 1.2
 	s.key("enter", 2.6)
-	s.key("3", 4.0) // log: every branch's graph, the new commit with its diffstat
-	s.key("j", 2.0) // the details follow the cursor
-	s.key("2", 2.6) // branches
-	s.key("j", 1.4) // fix/timeout
-	s.key("j", 1.8) // feature/hourly
-	s.key("enter", 3.2)
+	s.key("2", 4.0)     // log: every branch's graph, the new commit with its diffstat
+	s.key("j", 2.0)     // the details follow the cursor
+	s.key("b", 2.6)     // the branch list, over the log
+	s.key("j", 1.4)     // fix/timeout
+	s.key("j", 1.8)     // feature/hourly
+	s.key("enter", 3.2) // back in the log, on feature/hourly
 }
 
 // session drives the model like the Bubble Tea runtime would, but

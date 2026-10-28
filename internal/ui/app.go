@@ -49,12 +49,11 @@ const (
 	pollCost = 50
 )
 
-// viewKind is the screen selected with the number keys.
+// viewKind is the tab selected with the number keys.
 type viewKind int
 
 const (
 	viewFiles viewKind = iota
-	viewBranches
 	viewLog
 	viewCount // the number of views; ← and → wrap around
 )
@@ -101,13 +100,14 @@ type Model struct {
 	commitReq   request
 	commitCache map[string][]git.Commit // by full ref
 
-	view     viewKind
-	focus    focusArea
-	showHelp bool
-	zoomed   bool // the diff fills the body
-	busy     bool // a mutating git command is running
-	message  string
-	isErr    bool
+	view         viewKind
+	branchesOpen bool // the branch list covers the view until checkout or esc
+	focus        focusArea
+	showHelp     bool
+	zoomed       bool // the diff fills the body
+	busy         bool // a mutating git command is running
+	message      string
+	isErr        bool
 
 	width, height int
 }
@@ -211,19 +211,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch {
 	case key.Matches(msg, m.keys.Files):
 		return m, m.showView(viewFiles)
-	case key.Matches(msg, m.keys.Branches):
-		return m, m.showView(viewBranches)
 	case key.Matches(msg, m.keys.Log):
 		return m, m.showView(viewLog)
 	case key.Matches(msg, m.keys.NextView):
 		return m, m.showView((m.view + 1) % viewCount)
 	case key.Matches(msg, m.keys.PrevView):
 		return m, m.showView((m.view + viewCount - 1) % viewCount)
+	case key.Matches(msg, m.keys.Branches):
+		if m.branchesOpen {
+			return m, m.showView(m.view)
+		}
+		return m, m.openBranches()
 	}
-	switch m.view {
-	case viewBranches:
+	if m.branchesOpen {
 		return m, m.handleBranchKey(msg)
-	case viewLog:
+	}
+	if m.view == viewLog {
 		return m, m.handleLogKey(msg)
 	}
 
@@ -286,10 +289,14 @@ func (m *Model) handleLogKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+// handleBranchKey handles keys while the branch list is open. esc returns
+// to the view it was opened from.
 func (m *Model) handleBranchKey(msg tea.KeyMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		return tea.Quit
+	case key.Matches(msg, m.keys.Back):
+		return m.showView(m.view)
 	case key.Matches(msg, m.keys.Help):
 		m.showHelp = true
 	case key.Matches(msg, m.keys.Refresh):
@@ -312,26 +319,32 @@ func (m *Model) handleBranchKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-// showView switches screens. The branch list and the log are loaded every
-// time they are shown, so they are never stale; the files view catches up
-// on its diff.
+// showView switches tabs, closing the branch list. The log is loaded every
+// time it is shown, so it is never stale; the files view catches up on its
+// diff, which may have changed while the branch list covered it.
 func (m *Model) showView(v viewKind) tea.Cmd {
-	if v == m.view {
+	if v == m.view && !m.branchesOpen {
 		return nil
 	}
-	m.view, m.focus = v, focusFiles
+	m.view, m.focus, m.branchesOpen = v, focusFiles, false
 	m.diffSeq++ // a diff still loading belongs to the previous view
 	m.diffReq.stop()
-	switch v {
-	case viewBranches:
-		return m.reloadBranches()
-	case viewLog:
+	if v == viewLog {
 		if !m.diff.key.isCommit() {
 			m.diff.clear() // a file diff must not show in the log
 		}
 		return m.reloadLog()
 	}
 	return m.requestDiff()
+}
+
+// openBranches shows the branch list over the current view. It is loaded
+// every time it opens, so it is never stale.
+func (m *Model) openBranches() tea.Cmd {
+	m.branchesOpen = true
+	m.diffSeq++
+	m.diffReq.stop()
+	return m.reloadBranches()
 }
 
 func (m *Model) checkoutSelected() tea.Cmd {
@@ -355,9 +368,15 @@ func (m *Model) checkoutSelected() tea.Cmd {
 		name = short
 	}
 	repo := m.repo
-	return m.startOp("Switching to "+name+"…", "Switched to "+name, func(ctx context.Context) error {
+	cmd := m.startOp("Switching to "+name+"…", "Switched to "+name, func(ctx context.Context) error {
 		return repo.Checkout(ctx, b)
 	})
+	if cmd != nil {
+		// Back to the view underneath; the refresh after the switch
+		// reloads it.
+		m.branchesOpen = false
+	}
+	return cmd
 }
 
 func (m *Model) handleCommitKey(msg tea.KeyMsg) tea.Cmd {
@@ -616,7 +635,7 @@ func (m *Model) showStatus(msg statusLoadedMsg) tea.Cmd {
 		return nil
 	}
 	if msg.unchanged {
-		if m.view != viewFiles {
+		if m.view != viewFiles || m.branchesOpen {
 			return nil
 		}
 		m.clearDiffCache()
@@ -628,11 +647,11 @@ func (m *Model) showStatus(msg statusLoadedMsg) tea.Cmd {
 	if _, ok := m.diffTarget(); !ok && m.zoomed {
 		m.setZoom(false)
 	}
-	switch m.view {
-	case viewBranches:
-		// The diff is loaded when the files view is shown again.
+	switch {
+	case m.branchesOpen:
+		// The view underneath is reloaded when the list closes.
 		return m.reloadBranches()
-	case viewLog:
+	case m.view == viewLog:
 		return m.reloadLog()
 	}
 	return m.requestDiff()
@@ -666,7 +685,7 @@ func (m *Model) applyLog(msg logLoadedMsg) tea.Cmd {
 		return nil
 	}
 	l.set(msg.commits, msg.lanes, len(msg.commits) == msg.limit)
-	if m.view != viewLog {
+	if m.view != viewLog || m.branchesOpen {
 		return nil
 	}
 	return m.requestDiff()
@@ -843,7 +862,7 @@ func (m Model) paneLayout() layout {
 		return layout{listW: w, listH: listH, diffW: w, diffH: max(1, bodyH-listH-1), stacked: true}
 	}
 	listW := clamp(w*35/100, minListWidth, maxListWidth)
-	if m.view == viewLog {
+	if m.view == viewLog && !m.branchesOpen {
 		listW = (w - paneGap) * logListShare / 100
 	}
 	return layout{listW: listW, listH: bodyH, diffW: w - listW - paneGap, diffH: bodyH}
@@ -928,11 +947,11 @@ func (m Model) bodyLines(l layout) []string {
 		return lines(m.diff.view(m.styles, l.diffW))
 	}
 	var list, pane string
-	switch m.view {
-	case viewBranches:
+	switch {
+	case m.branchesOpen:
 		list = m.branches.view(m.styles, l.listW)
 		pane = m.commits.view(m.styles, l.diffW)
-	case viewLog:
+	case m.view == viewLog:
 		list = m.log.view(m.styles, l.listW, m.focus == focusFiles)
 		pane = m.diff.view(m.styles, l.diffW)
 	default:
@@ -1034,8 +1053,7 @@ func (m Model) tabsView() string {
 		}
 		return st.TabKey.Render(b.Help().Key) + " " + style.Render(label)
 	}
-	return tab(m.keys.Files, "Files", viewFiles) + "   " + tab(m.keys.Branches, "Branches", viewBranches) +
-		"   " + tab(m.keys.Log, "Log", viewLog)
+	return tab(m.keys.Files, "Files", viewFiles) + "   " + tab(m.keys.Log, "Log", viewLog)
 }
 
 func (m Model) footerView() string {
@@ -1068,10 +1086,10 @@ func (m Model) footerLine() string {
 	if m.zoomed {
 		return m.hints(m.keys.DiffHelp())
 	}
-	switch m.view {
-	case viewBranches:
+	switch {
+	case m.branchesOpen:
 		return m.hints(m.keys.BranchHelp())
-	case viewLog:
+	case m.view == viewLog:
 		return m.hints(m.keys.LogHelp())
 	}
 	return m.hints(m.keys.ShortHelp())
