@@ -115,7 +115,7 @@ func plainView(m Model) string { return ansi.Strip(m.View()) }
 func TestInitialView(t *testing.T) {
 	m, _ := newTestModel(t)
 	v := plainView(m)
-	for _, want := range []string{"main", "Unstaged", "a.txt", "b.txt", "+two"} {
+	for _, want := range []string{"main", "Unstaged", "a.txt", "b.txt", "a.txt  +1", "+two"} {
 		if !strings.Contains(v, want) {
 			t.Errorf("view missing %q:\n%s", want, v)
 		}
@@ -601,10 +601,16 @@ func TestLogView(t *testing.T) {
 	v := plainView(m)
 	for _, want := range []string{
 		"2 Log", "All branches  2", "second commit", "init",
-		"(HEAD → main)", "Author: Test", " a.txt | 1 +", " b.txt | 2 +-", "diff --git a/a.txt",
+		"(HEAD → main)", "Author: Test", " a.txt | 1 +", " b.txt | 2 +-", "a.txt  +1", "b.txt  +1  -1",
 	} {
 		if !strings.Contains(v, want) {
 			t.Errorf("log view missing %q:\n%s", want, v)
+		}
+	}
+	// git's own file header lines are replaced by one line per file.
+	for _, gone := range []string{"diff --git", "index ", "+++ b/"} {
+		if strings.Contains(v, gone) {
+			t.Errorf("log view shows %q:\n%s", gone, v)
 		}
 	}
 
@@ -705,7 +711,7 @@ func TestLogGraph(t *testing.T) {
 	// show next to the graph.
 	for _, want := range []string{
 		"All branches  4",
-		"› ●─╮  " + hash(0) + "  main Merge branch 'feat'",
+		"› ◉─╮  " + hash(0) + "  main Merge branch 'feat'",
 		"│ ●  " + hash(2) + "  feat feat work",
 		"●─╯  " + hash(3) + "  init",
 		"Merge: ", "Author: Test",

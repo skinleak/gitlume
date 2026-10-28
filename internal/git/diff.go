@@ -40,8 +40,12 @@ func (r *Repo) Diff(ctx context.Context, c Change) (Diff, error) {
 	return Diff{Text: string(out), Truncated: res.truncated}, nil
 }
 
+// diffPrefixes pin the a/ and b/ path prefixes, which diff.noprefix and
+// diff.mnemonicPrefix would change, so callers can parse file names.
+var diffPrefixes = []string{"--src-prefix=a/", "--dst-prefix=b/"}
+
 func diffInvocation(c Change) invocation {
-	base := []string{"diff", "--no-color", "--no-ext-diff"}
+	base := append([]string{"diff", "--no-color", "--no-ext-diff"}, diffPrefixes...)
 	switch c.Group {
 	case Untracked:
 		// --no-index exits 1 when the files differ, which they always do.

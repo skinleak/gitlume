@@ -9,14 +9,26 @@ import (
 )
 
 // graphCell is one terminal cell of the commit graph. Even cells are
-// lanes, odd cells the gaps between them. color indexes theme.Lanes; -1
-// is a blank cell.
+// lanes, odd cells the gaps between them. color is a lane color (see
+// paintFor); -1 is a blank cell.
 type graphCell struct {
 	r     rune
 	color int32
 }
 
 var blankCell = graphCell{' ', -1}
+
+// headColor is the lane color of HEAD's history from HEAD down, so the
+// branch you are on always has the accent color. Other lanes count up
+// from 1.
+const headColor = 0
+
+// Commit nodes: HEAD, a merge, any other commit.
+const (
+	nodeHead   = '◉'
+	nodeMerge  = '○'
+	nodeCommit = '●'
+)
 
 // graphEdge is a line that leaves the commit's lane sideways in its row.
 type graphEdge struct {
@@ -44,17 +56,27 @@ const (
 func layoutGraph(commits []git.Commit) [][]graphCell {
 	var lanes []string // the commit each lane leads to; "" is free
 	var colors []int32
-	var next int32 // the color of the next new lane
+	next := int32(headColor + 1) // the color of the next new lane
 	rows := make([][]graphCell, len(commits))
 	for n, c := range commits {
 		col := slices.Index(lanes, c.ID)
-		if col < 0 {
+		fresh := col < 0
+		if fresh {
 			col = slices.Index(lanes, "")
 			if col < 0 {
 				col = len(lanes)
 				lanes, colors = append(lanes, ""), append(colors, 0)
 			}
+		}
+		node := nodeCommit
+		switch {
+		case isHead(c.Refs):
+			node, colors[col] = nodeHead, headColor
+		case fresh:
 			colors[col], next = next, next+1
+		}
+		if node != nodeHead && len(c.Parents) > 1 {
+			node = nodeMerge
 		}
 		var edges []graphEdge
 		for j, id := range lanes {
@@ -86,7 +108,7 @@ func layoutGraph(commits []git.Commit) [][]graphCell {
 			edges = append(edges, graphEdge{k, colors[k], edgeMerge})
 		}
 
-		rows[n] = drawRow(len(lanes), col, colors[col], passing, colors, edges)
+		rows[n] = drawRow(len(lanes), col, graphCell{node, colors[col]}, passing, colors, edges)
 		for len(lanes) > 0 && lanes[len(lanes)-1] == "" {
 			lanes, colors = lanes[:len(lanes)-1], colors[:len(colors)-1]
 		}
@@ -105,7 +127,13 @@ func freeLane(lanes []string, col int, edges []graphEdge) int {
 	return len(lanes)
 }
 
-func drawRow(width, col int, color int32, passing []bool, colors []int32, edges []graphEdge) []graphCell {
+// isHead reports whether a commit's decorations include HEAD, attached
+// ("HEAD -> refs/heads/main") or detached.
+func isHead(refs []string) bool {
+	return slices.ContainsFunc(refs, func(r string) bool { return r == "HEAD" || strings.HasPrefix(r, "HEAD -> ") })
+}
+
+func drawRow(width, col int, node graphCell, passing []bool, colors []int32, edges []graphEdge) []graphCell {
 	cells := make([]graphCell, 2*width-1)
 	for i := range cells {
 		cells[i] = blankCell
@@ -115,7 +143,7 @@ func drawRow(width, col int, color int32, passing []bool, colors []int32, edges 
 			cells[2*j] = graphCell{'│', colors[j]}
 		}
 	}
-	cells[2*col] = graphCell{'●', color}
+	cells[2*col] = node
 
 	// The horizontal lines: the farthest first, so the nearer ones keep
 	// their own color next to the commit. Lanes passing through stay
@@ -168,27 +196,32 @@ func abs(n int) int {
 	return n
 }
 
-// lanePaint is the escape codes around text in one lane color. Calling
-// Render for every run of a wide graph would cost more than the rest of
-// the frame, so each lane style renders a placeholder once per frame.
-type lanePaint struct{ open, close string }
-
-func lanePaints(st theme.Styles) []lanePaint {
-	out := make([]lanePaint, len(st.Lanes))
+// lanePaints are the paints of the lane colors.
+func lanePaints(st theme.Styles) []paint {
+	out := make([]paint, len(st.Lanes))
 	for i, s := range st.Lanes {
-		out[i].open, out[i].close, _ = strings.Cut(s.Render("\x00"), "\x00")
+		out[i] = paintOf(s)
 	}
 	return out
 }
 
+// paintFor picks the paint of lane color c: the first for HEAD's line,
+// the others in turn for the rest.
+func paintFor(paints []paint, c int32) paint {
+	if c < 0 || len(paints) == 0 {
+		return paint{}
+	}
+	if c == headColor || len(paints) == 1 {
+		return paints[0]
+	}
+	return paints[1+int(c-1)%(len(paints)-1)]
+}
+
 // renderGraph paints one row of cells, one color per run.
-func renderGraph(paints []lanePaint, cells []graphCell) string {
+func renderGraph(paints []paint, cells []graphCell) string {
 	var b strings.Builder
 	for i := 0; i < len(cells); {
-		var p lanePaint
-		if c := cells[i].color; c >= 0 && len(paints) > 0 {
-			p = paints[int(c)%len(paints)]
-		}
+		p := paintFor(paints, cells[i].color)
 		b.WriteString(p.open)
 		j := i
 		for ; j < len(cells) && cells[j].color == cells[i].color; j++ {

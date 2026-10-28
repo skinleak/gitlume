@@ -17,7 +17,8 @@ type Palette struct {
 	Error   lipgloss.TerminalColor
 	Warning lipgloss.TerminalColor
 	Remote  lipgloss.TerminalColor
-	// Lanes colors the branch lines of the commit graph, GitHub style.
+	// Lanes colors the branch lines of the commit graph, GitHub style. The
+	// first, the accent, is HEAD's line; the others take turns.
 	Lanes []lipgloss.TerminalColor
 }
 
@@ -67,6 +68,7 @@ type Styles struct {
 	DiffDel  lipgloss.Style
 	DiffHunk lipgloss.Style
 	DiffMeta lipgloss.Style
+	DiffFile lipgloss.Style // the file name in a diff's file header
 
 	Error   lipgloss.Style
 	Info    lipgloss.Style
@@ -89,7 +91,7 @@ type Styles struct {
 	Gone          lipgloss.Style
 	CommitHash    lipgloss.Style
 
-	// Lanes has one style per graph lane color; lane n uses Lanes[n%len].
+	// Lanes has one style per graph lane color; Lanes[0] is HEAD's line.
 	Lanes []lipgloss.Style
 
 	Tab       lipgloss.Style
@@ -117,6 +119,7 @@ func New(p Palette) Styles {
 		DiffDel:  s().Foreground(p.Removed),
 		DiffHunk: s().Foreground(p.Accent),
 		DiffMeta: s().Foreground(p.Muted),
+		DiffFile: s().Foreground(p.Text).Bold(true),
 
 		Error:   s().Foreground(p.Error),
 		Info:    s().Foreground(p.Muted),

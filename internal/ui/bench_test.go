@@ -48,13 +48,16 @@ func BenchmarkDiffView(b *testing.B) {
 	}
 }
 
-// BenchmarkSplitDiff prepares a maximum-size diff for display.
+// BenchmarkSplitDiff prepares a maximum-size diff of many files for
+// display, as loadDiff and loadShow do.
 func BenchmarkSplitDiff(b *testing.B) {
-	text := strings.Repeat("+\tsome added line of code with a fair amount of text\n", git.MaxDiffBytes/52)
+	file := "diff --git a/src/file.go b/src/file.go\nindex 6cb5c6c..de98044 100644\n--- a/src/file.go\n+++ b/src/file.go\n@@ -1,3 +1,50 @@\n" +
+		strings.Repeat("+\tsome added line of code with a fair amount of text\n", 50)
+	text := strings.Repeat(file, git.MaxDiffBytes/len(file))
 	b.SetBytes(int64(len(text)))
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = splitDiff(text)
+		_, _ = tidyPatch(splitDiff(text), false)
 	}
 }
 

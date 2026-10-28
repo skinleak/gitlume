@@ -193,6 +193,31 @@ func TestDiff(t *testing.T) {
 	}
 }
 
+func TestDiffIgnoresPrefixConfig(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	writeFile(t, r.Root(), "tracked.txt", "two\n")
+	writeFile(t, r.Root(), "fresh.txt", "new\n")
+	gitCmd(t, r.Root(), "commit", "-q", "-am", "two")
+	writeFile(t, r.Root(), "tracked.txt", "three\n")
+	for _, cfg := range [][2]string{{"diff.noprefix", "true"}, {"diff.mnemonicPrefix", "true"}} {
+		gitCmd(t, r.Root(), "config", cfg[0], cfg[1])
+		unstaged, err := r.Diff(ctx, Change{Group: Unstaged, Path: "tracked.txt"})
+		if err != nil || !strings.Contains(unstaged.Text, "+++ b/tracked.txt") {
+			t.Errorf("%s: unstaged diff = %v\n%s", cfg[0], err, unstaged.Text)
+		}
+		untracked, err := r.Diff(ctx, Change{Group: Untracked, Path: "fresh.txt"})
+		if err != nil || !strings.Contains(untracked.Text, "+++ b/fresh.txt") {
+			t.Errorf("%s: untracked diff = %v\n%s", cfg[0], err, untracked.Text)
+		}
+		show, err := r.Show(ctx, "HEAD", 80)
+		if err != nil || !strings.Contains(show.Text, "+++ b/tracked.txt") {
+			t.Errorf("%s: show = %v\n%s", cfg[0], err, show.Text)
+		}
+		gitCmd(t, r.Root(), "config", "--unset", cfg[0])
+	}
+}
+
 func TestDiffStagedRename(t *testing.T) {
 	ctx := context.Background()
 	r := newTestRepo(t)
