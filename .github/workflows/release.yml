@@ -1,0 +1,22 @@
+# Pushing a version tag (v1.2.3) publishes it to the Go module proxy right
+# away, so `go install github.com/skinleak/gitlume/cmd/gitlume@latest`
+# serves it to everyone without waiting for the proxy's cache to expire.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Fetch the tag through proxy.golang.org
+        env:
+          GOPROXY: https://proxy.golang.org
+        run: |
+          go list -m "github.com/skinleak/gitlume@${GITHUB_REF_NAME}"
+          go list -m github.com/skinleak/gitlume@latest

@@ -201,6 +201,22 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   `go run ./tools/preview`, and look at it: the script presses keys blindly,
   so a changed sort order or binding silently records the wrong thing.
 
+## Releasing
+
+Users install with `go install .../cmd/gitlume@latest`, which resolves to
+the highest `vX.Y.Z` tag. Untagged commits on main never reach them, and the
+Go proxy caches `@latest`, so a release is a tag:
+
+```sh
+git tag -a v0.2.0 -m "v0.2.0: <what changed>"
+git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` then asks proxy.golang.org for the tag, which
+makes it `@latest` for everyone at once. Bump the minor version for
+features and the patch version for fixes; `v0.x` means no compatibility
+promises yet.
+
 ## Performance budget
 
 These are measured with the benchmarks in `*/bench_test.go`. Keep them in
