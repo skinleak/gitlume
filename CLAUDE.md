@@ -74,8 +74,8 @@ internal/ui/
   list.go                sectionList[T]: sectioned rows, cursor, scrolling (shared)
   status.go              fileList: change rows and selection restore
   diff.go                diffView: renders only visible lines, truncates (never wraps)
-  branches.go            branchList + commitsView for the branch view (`2`)
-  log.go                 logList (the log `3`: all branches as a graph) and commit-header styling
+  branches.go            branchList + commitsView: the branch list (`b`) over files or log
+  log.go                 logList (the log `2`: all branches as a graph) and commit-header styling
   graph.go               lane layout and rendering for the log's graph
   commit.go              commit prompt (textinput)
   confirm.go             y/n question guarding destructive operations
@@ -110,12 +110,14 @@ tools/preview/           drives the real Model through a script, writes docs/pre
    request cancels the running load's git process (`diffReq`), since key
    repeat (~33 ms) outpaces the debounce. Commits (`commitReq`) and
    histories (`logList.req`) are cancelled the same way.
-5. The branch view (`2`) loads branches every time it is shown and after
-   every status refresh while it is visible (`branchSeq`). The selected
+5. The branch list (`b`) is not a tab: `branchesOpen` covers the files or
+   log view until a checkout, `esc` or a tab key, and `showView` then
+   reloads the view beneath. It loads branches every time it opens and
+   after every status refresh while it is open (`branchSeq`). The selected
    branch's commits load like diffs: debounced, `commitSeq`-checked, cached
    per ref and cleared with each branch reload. The files view requests its
    diff again when it is shown.
-6. The log view (`3`) is the history of all local and remote branches
+6. The log view (`2`) is the history of all local and remote branches
    plus HEAD, drawn as a graph, loaded in pages of `logPage` commits
    (`logList.seq`); the next page loads when the cursor nears the end.
    `loadLog` lays out the lanes (`layoutGraph`) in the background along
@@ -259,7 +261,7 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   so a changed sort order or binding silently records the wrong thing. To
   read frames as text, drop a throwaway `_test.go` into `tools/preview`
   that runs `setupRepo` + `script` and prints `ansi.Strip(frame.ansi)`,
-  then delete it. Keep the demo repo's dates so the branch view's order
+  then delete it. Keep the demo repo's dates so the branch list's order
   (main oldest of the local branches) still matches the script. Commit
   hashes and dates differ on every run, so a regenerated clip always
   differs; only commit it when frames actually changed.
@@ -330,12 +332,14 @@ Released as `v0.3.0`: background status polling, coalesced refreshes,
 cancelled stale loads, a 3× cheaper frame, and the fixes from the
 reliability review.
 
-Unreleased (next: `v0.4.0`): the log and the graph merged into one tab
-(`3`): the graph of all branches with hashes, next to the selected
-commit's details and diff; `4` is gone. Check `git ls-remote --tags origin` before
-picking a version; the roadmap can lag behind the tags.
+Unreleased (next: `v0.4.0`): the log and the graph merged into one tab:
+the graph of all branches with hashes, next to the selected commit's
+details and diff. The branch view is no longer a tab but a list opened
+with `b` over files or the log. Two tabs remain: files `1`, log `2`.
+Check `git ls-remote --tags origin` before picking a version; the roadmap
+can lag behind the tags.
 
 Each view gets its own model file in `internal/ui` and its own git
 functions + tests in `internal/git`. There is nothing planned beyond this;
 new features come from the owner. The views are deliberately few, so think
-twice before suggesting a fourth tab.
+twice before suggesting a third tab.

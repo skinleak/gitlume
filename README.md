@@ -32,9 +32,10 @@ Run `gitlume` anywhere inside a git work tree.
 | `d`              | Discard all changes to the selected file (asks first) |
 | `D`              | Discard all uncommitted changes, including untracked files (asks first) |
 | `c`              | Commit (`enter` to confirm, `esc` to cancel) |
-| `1` / `2` / `3`  | Switch between files, branches and the log: a graph of all branches next to the selected commit's files and diff |
+| `1` / `2`        | Switch between files and the log: a graph of all branches next to the selected commit's files and diff |
 | `←` / `→`        | Previous / next tab (wraps around)    |
-| `enter` (branches) | Check out the selected branch (a remote branch gets a local tracking branch) |
+| `b`              | Open the branch list, from files or the log (`esc` to go back) |
+| `enter` (branches) | Check out the selected branch and go back (a remote branch gets a local tracking branch) |
 | `r`              | Refresh                               |
 | `?`              | Show all keybindings                  |
 | `q`              | Quit                                  |
@@ -84,5 +85,5 @@ tools/preview/        records the README clip from the real UI
 
 ## Roadmap
 
-Done: status, diff, stage, discard, commit, the branch view, and the log
+Done: status, diff, stage, discard, commit, the branch list, and the log
 with its graph of all branches.

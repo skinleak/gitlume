@@ -126,7 +126,7 @@ func TestViewFitsWindow(t *testing.T) {
 	m, _ := newTestModel(t)
 	for _, size := range [][2]int{{100, 30}, {60, 20}, {200, 50}, {30, 8}, {20, 4}, {10, 2}} {
 		m = pump(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm", "branches", "log", "log zoom"} {
+		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm", "branches", "log", "log zoom", "log branches"} {
 			mm := m
 			switch mode {
 			case "help":
@@ -142,11 +142,14 @@ func TestViewFitsWindow(t *testing.T) {
 			case "confirm":
 				mm = pump(t, mm, keyPress("D"))
 			case "branches":
+				mm = pump(t, mm, keyPress("b"))
+			case "log branches":
 				mm = pump(t, mm, keyPress("2"))
+				mm = pump(t, mm, keyPress("b"))
 			case "log":
-				mm = pump(t, mm, keyPress("3"))
+				mm = pump(t, mm, keyPress("2"))
 			case "log zoom":
-				mm = pump(t, mm, keyPress("3"))
+				mm = pump(t, mm, keyPress("2"))
 				mm = pump(t, mm, keyPress("enter"))
 			}
 			lines := strings.Split(plainView(mm), "\n")
@@ -230,7 +233,7 @@ func TestDiffFromPreviousViewDropped(t *testing.T) {
 	m, _ := newTestModel(t)
 	seq := m.diffSeq
 	// The stale reply arrives after the switch but before the log loads.
-	next, loadLog := m.Update(keyPress("3"))
+	next, loadLog := m.Update(keyPress("2"))
 	m = pump(t, next.(Model), diffLoadedMsg{seq: seq, key: diffKey{group: git.Unstaged, path: "a.txt"},
 		content: diffContent{lines: []string{"+stale file diff"}}})
 	if strings.Contains(plainView(m), "stale file diff") {
@@ -453,18 +456,18 @@ func TestCommitHintFits(t *testing.T) {
 	}
 }
 
-func TestBranchView(t *testing.T) {
+func TestBranchList(t *testing.T) {
 	m, dir := newTestModel(t)
 	gitRun(t, dir, "branch", "feature")
-	if v := plainView(m); !strings.Contains(v, "1 Files") || !strings.Contains(v, "2 Branches") {
-		t.Fatalf("tabs missing from header:\n%s", v)
+	if v := plainView(m); !strings.Contains(v, "1 Files   2 Log") || strings.Contains(v, "Branches") {
+		t.Fatalf("want two tabs, Files and Log:\n%s", v)
 	}
 
-	m = pump(t, m, keyPress("2"))
+	m = pump(t, m, keyPress("b"))
 	v := plainView(m)
-	for _, want := range []string{"Local  2", "* main", "feature", "init", "enter checkout"} {
+	for _, want := range []string{"Local  2", "* main", "feature", "init", "enter checkout", "esc back"} {
 		if !strings.Contains(v, want) {
-			t.Errorf("branch view missing %q:\n%s", want, v)
+			t.Errorf("branch list missing %q:\n%s", want, v)
 		}
 	}
 	if b, _ := m.branches.selected(); !b.Current {
@@ -472,23 +475,56 @@ func TestBranchView(t *testing.T) {
 	}
 
 	m = pump(t, m, keyPress("enter"))
-	if !strings.Contains(plainView(m), "Already on main") {
+	if !m.branchesOpen || !strings.Contains(plainView(m), "Already on main") {
 		t.Errorf("checkout of the current branch:\n%s", plainView(m))
 	}
 
+	// A checkout closes the list: the files are back, with their diff.
 	m = selectBranch(t, m, "feature")
 	m = pump(t, m, keyPress("enter"))
 	if m.status.Branch.Head != "feature" || !strings.Contains(plainView(m), "Switched to feature") {
 		t.Fatalf("head = %q after checkout:\n%s", m.status.Branch.Head, plainView(m))
 	}
+	if v := plainView(m); m.branchesOpen || !strings.Contains(v, "a.txt") || !strings.Contains(v, "+two") {
+		t.Errorf("files view after checkout:\n%s", v)
+	}
+	m = pump(t, m, keyPress("b"))
 	if b, _ := m.branches.selected(); b.Name != "feature" || !b.Current {
 		t.Errorf("selection after checkout = %+v, want current feature", b)
 	}
+}
 
-	// Back to files: the changes and their diff are still there.
+func TestBranchListReturnsToItsView(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = pump(t, m, keyPress("2"))
+	for _, closer := range []string{"esc", "b"} {
+		m = pump(t, m, keyPress("b"))
+		if !m.branchesOpen || !strings.Contains(plainView(m), "Local  1") {
+			t.Fatalf("b in the log did not open the branch list:\n%s", plainView(m))
+		}
+		m = pump(t, m, keyPress(closer))
+		if v := plainView(m); m.branchesOpen || m.view != viewLog || !strings.Contains(v, "All branches") || !strings.Contains(v, "Author:") {
+			t.Errorf("%s did not return to the log:\n%s", closer, v)
+		}
+	}
+
+	// A tab key closes the list and shows that tab, even the one beneath.
+	m = pump(t, m, keyPress("b"))
 	m = pump(t, m, keyPress("1"))
-	if v := plainView(m); !strings.Contains(v, "a.txt") || !strings.Contains(v, "+two") {
-		t.Errorf("files view after switching back:\n%s", v)
+	if v := plainView(m); m.branchesOpen || m.view != viewFiles || !strings.Contains(v, "+two") {
+		t.Errorf("1 did not show the files:\n%s", v)
+	}
+	m = pump(t, m, keyPress("b"))
+	m = pump(t, m, keyPress("1"))
+	if m.branchesOpen {
+		t.Error("1 did not close the list over the files")
+	}
+
+	// Files keys do nothing while the list covers the files.
+	m = pump(t, m, keyPress("b"))
+	m = pump(t, m, keyPress(" "))
+	if m.files.count(git.Staged) != 0 {
+		t.Error("space staged a file under the branch list")
 	}
 }
 
@@ -501,7 +537,7 @@ func TestCheckoutRefusalShown(t *testing.T) {
 	gitRun(t, dir, "switch", "-q", "main")
 	gitRun(t, dir, "stash", "pop", "-q")
 
-	m = pump(t, m, keyPress("2"))
+	m = pump(t, m, keyPress("b"))
 	m = selectBranch(t, m, "other")
 	m = pump(t, m, keyPress("enter"))
 	if !m.isErr || !strings.Contains(m.message, "would be overwritten") || m.status.Branch.Head != "main" {
@@ -561,10 +597,10 @@ func TestLogView(t *testing.T) {
 	m, dir := newTestModel(t)
 	gitRun(t, dir, "commit", "-q", "-am", "second commit")
 	m = pump(t, m, keyPress("r"))
-	m = pump(t, m, keyPress("3"))
+	m = pump(t, m, keyPress("2"))
 	v := plainView(m)
 	for _, want := range []string{
-		"3 Log", "All branches  2", "second commit", "init",
+		"2 Log", "All branches  2", "second commit", "init",
 		"(HEAD → main)", "Author: Test", " a.txt | 1 +", " b.txt | 2 +-", "diff --git a/a.txt",
 	} {
 		if !strings.Contains(v, want) {
@@ -592,7 +628,7 @@ func TestLogLoadsMoreWhenNearTheEnd(t *testing.T) {
 	gitRun(t, dir, "commit", "-q", "-am", "second")
 	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "third")
 	m.log.limit = 1
-	m = pump(t, m, keyPress("3"))
+	m = pump(t, m, keyPress("2"))
 	if len(m.log.items) != 1 || !strings.Contains(plainView(m), "All branches  1+") {
 		t.Fatalf("first page: %d commits:\n%s", len(m.log.items), plainView(m))
 	}
@@ -606,14 +642,14 @@ func TestLogOnUnbornBranch(t *testing.T) {
 	m, dir := newTestModel(t)
 	gitRun(t, dir, "checkout", "-q", "--orphan", "fresh")
 	m = pump(t, m, keyPress("r"))
-	m = pump(t, m, keyPress("3"))
+	m = pump(t, m, keyPress("2"))
 	// HEAD has no commits, but the other branches still show.
 	if v := plainView(m); !strings.Contains(v, "All branches  1") || !strings.Contains(v, "main init") || m.isErr {
 		t.Errorf("log on an unborn branch:\n%s", v)
 	}
 
 	m = newEmptyModel(t, "empty")
-	m = pump(t, m, keyPress("3"))
+	m = pump(t, m, keyPress("2"))
 	if v := plainView(m); !strings.Contains(v, "No commits yet") || m.isErr {
 		t.Errorf("log of an empty repository:\n%s", v)
 	}
@@ -622,7 +658,7 @@ func TestLogOnUnbornBranch(t *testing.T) {
 func TestArrowsSwitchTabs(t *testing.T) {
 	m, _ := newTestModel(t)
 	right, left := tea.KeyMsg{Type: tea.KeyRight}, tea.KeyMsg{Type: tea.KeyLeft}
-	for _, want := range []viewKind{viewBranches, viewLog, viewFiles} {
+	for _, want := range []viewKind{viewLog, viewFiles} {
 		if m = pump(t, m, right); m.view != want {
 			t.Fatalf("→: view %d, want %d", m.view, want)
 		}
@@ -659,7 +695,7 @@ func TestLogGraph(t *testing.T) {
 	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "main work")
 	gitRun(t, dir, "merge", "-q", "--no-ff", "--no-edit", "feat")
 	m = pump(t, m, keyPress("r"))
-	m = pump(t, m, keyPress("3"))
+	m = pump(t, m, keyPress("2"))
 	if len(m.log.items) != 4 {
 		t.Fatalf("log has %d commits, want 4", len(m.log.items))
 	}
@@ -681,8 +717,8 @@ func TestLogGraph(t *testing.T) {
 	if strings.Contains(v, "Graph") {
 		t.Errorf("the graph tab is still shown:\n%s", v)
 	}
-	if next, _ := m.Update(keyPress("4")); next.(Model).view != viewLog {
-		t.Error("4 still switches views")
+	if next, _ := m.Update(keyPress("3")); next.(Model).view != viewLog {
+		t.Error("3 still switches views")
 	}
 
 	m = pump(t, m, keyPress("j"))
@@ -698,7 +734,7 @@ func TestLogListIsWider(t *testing.T) {
 	gitRun(t, dir, "commit", "-q", "-am", subject)
 	m = pump(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
 	m = pump(t, m, keyPress("r"))
-	m = pump(t, m, keyPress("3"))
+	m = pump(t, m, keyPress("2"))
 	// The file list's width would cut the row off after the hash and refs.
 	// The details pane shows the subject too, so look for the row.
 	if v := plainView(m); !strings.Contains(v, "main "+subject) {
@@ -764,7 +800,7 @@ func TestTabSwitchNeverShowsOtherViewsDiff(t *testing.T) {
 	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "second")
 	m = pump(t, m, keyPress("r"))
 	// Before the log has loaded, the file diff must already be gone.
-	next, cmd := m.Update(keyPress("3"))
+	next, cmd := m.Update(keyPress("2"))
 	m = next.(Model)
 	if v := plainView(m); strings.Contains(v, "+two") {
 		t.Errorf("the files view's diff shows in the log:\n%s", v)
@@ -852,7 +888,7 @@ func TestPollUpdatesDiffOfModifiedFile(t *testing.T) {
 	}
 
 	// An unchanged status reloads nothing else.
-	m = pump(t, m, keyPress("3"))
+	m = pump(t, m, keyPress("2"))
 	seq := m.log.seq
 	m = pump(t, m, pollTickMsg{at: time.Now().Add(2 * time.Hour)})
 	if m.log.seq != seq {
