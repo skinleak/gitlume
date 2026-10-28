@@ -22,6 +22,8 @@ type KeyMap struct {
 	Branches   key.Binding
 	Log        key.Binding
 	Graph      key.Binding
+	PrevView   key.Binding
+	NextView   key.Binding
 	ScrollUp   key.Binding
 	ScrollDown key.Binding
 	Refresh    key.Binding
@@ -103,6 +105,14 @@ func Default() KeyMap {
 		Graph: key.NewBinding(
 			key.WithKeys("4"),
 			key.WithHelp("4", "graph"),
+		),
+		PrevView: key.NewBinding(
+			key.WithKeys("left"),
+			key.WithHelp("←", "previous tab"),
+		),
+		NextView: key.NewBinding(
+			key.WithKeys("right"),
+			key.WithHelp("→", "next tab"),
 		),
 		ScrollUp: key.NewBinding(
 			key.WithKeys("ctrl+u", "pgup"),
@@ -189,7 +199,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Focus, k.ScrollUp, k.ScrollDown, k.Open, k.Back},
 		{k.Toggle, k.StageAll, k.Discard, k.DiscardAll, k.Commit, k.Refresh},
-		{k.Files, k.Branches, k.Log, k.Graph, k.Checkout, k.Help, k.Quit},
+		{k.Files, k.Branches, k.Log, k.Graph, k.PrevView, k.NextView, k.Checkout, k.Help, k.Quit},
 	}
 }
 
