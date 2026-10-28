@@ -5,6 +5,36 @@ smaller and calmer. Priorities, in order: **reliability, performance, a clean
 minimal UI, a maintainable codebase**. Do not add features, options, or
 dependencies that were not asked for.
 
+## How we work
+
+The owner (GitHub `skinleak/gitlume`) asks for features in short, casual
+messages and often says "you decide". Follow this without being told:
+
+- **Decide design details yourself** within the rules below and say in a
+  sentence or two what you chose and why. Ask only for real product
+  choices (where a feature lives, what a key does), with a recommendation.
+- **Work on a branch, never on main.** Start from an up-to-date `main`:
+  `feature/<name>` for features, `fix/<name>` for bugs, `ci/` and `docs/`
+  for the rest. The owner reviews and merges pull requests on GitHub.
+- **Commit, push and open the PR** (`gh pr create --base main`) once the
+  change is done and verified, unless the owner says they'll commit it
+  themselves. Commit messages are `type: lowercase summary` with `feat`,
+  `fix`, `ui`, `ci` or `docs`. Never push to main, never force-push, and
+  never merge a PR yourself.
+- **A change is finished when**, besides the definition of done below:
+  every bug fix and parser has a test, checked to fail without the fix;
+  benchmarks touching a hot path stay in the performance budget; and the
+  docs match the code: the README keys table and roadmap, this file's
+  architecture, data flow, gotchas and roadmap, `keys.FullHelp()`, and the
+  README clip (regenerated and checked frame by frame, see Gotchas).
+- **After a PR is merged, offer a release** with the next version (see
+  Releasing). Merged but untagged work never reaches users.
+- **Report at the end:** what changed, any bug found along the way, what
+  you chose not to do and why, the branch/PR link, and new files if the
+  owner is committing.
+- **When asked to review for bugs or bottlenecks**, fix what you find
+  (with tests) instead of only listing it, and name what is left and why.
+
 ## Commands
 
 ```sh
@@ -52,6 +82,7 @@ internal/ui/
   theme/                 the ONLY place colors and lipgloss styles are defined
   keys/                  the ONLY place keybindings are defined
 tools/preview/           drives the real Model through a script, writes docs/preview.svg
+.github/workflows/       release.yml: publishes pushed version tags to the Go proxy
 ```
 
 ### Data flow
@@ -199,7 +230,32 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   quit/back), so put new bindings where they rank, not at the end.
 - **Regenerate the README clip after visible UI changes** with
   `go run ./tools/preview`, and look at it: the script presses keys blindly,
-  so a changed sort order or binding silently records the wrong thing.
+  so a changed sort order or binding silently records the wrong thing. To
+  read frames as text, drop a throwaway `_test.go` into `tools/preview`
+  that runs `setupRepo` + `script` and prints `ansi.Strip(frame.ansi)`,
+  then delete it. Keep the demo repo's dates so the branch view's order
+  (main oldest of the local branches) still matches the script.
+
+## Releasing
+
+Users install with `go install .../cmd/gitlume@latest`, which resolves to
+the highest `vX.Y.Z` tag. Untagged commits on main never reach them, and the
+Go proxy caches `@latest`, so a release is a tag:
+
+```sh
+git tag -a v0.2.0 -m "v0.2.0: <what changed>"
+git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` then asks proxy.golang.org for the tag, which
+makes it `@latest` for everyone at once. Bump the minor version for
+features and the patch version for fixes; `v0.x` means no compatibility
+promises yet. Tag merged commits on `main` only, after `git pull`, and
+check with `go list -m github.com/skinleak/gitlume@latest` (run outside
+the repo) that the proxy serves the new version.
+
+Never tell users to install `@main`: it ships unreleased work, and the
+README command must stay `@latest`.
 
 ## Performance budget
 
@@ -232,9 +288,12 @@ Anything proportional to repo or diff size belongs in a `tea.Cmd`, not in
 
 ## Roadmap
 
-Done: milestone 1 (status, diff, stage/unstage, stage all, commit, help),
-discard (file and all, behind a y/n question), fullscreen diff (`enter`),
-branch view with checkout (`2`), log view (`3`), graph of all branches
-(`4`). Each view gets its own
-model file in `internal/ui` and its own git functions + tests in
-`internal/git`.
+Released as `v0.1.0`: milestone 1 (status, diff, stage/unstage, stage
+all, commit, help), discard (file and all, behind a y/n question),
+fullscreen diff (`enter`), branch view with checkout (`2`), log view (`3`),
+full-page graph of all branches (`4`).
+
+Each view gets its own model file in `internal/ui` and its own git
+functions + tests in `internal/git`. There is nothing planned beyond this;
+new features come from the owner. The views are deliberately few, so think
+twice before suggesting a fifth tab.
