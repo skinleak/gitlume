@@ -47,14 +47,24 @@ func (l *logList) view(st theme.Styles, width int, focused bool) string {
 	}
 	rows := l.visible()
 	paints := lanePaints(st)
+	// Hashes and subjects line up after the widest graph on screen, unless
+	// it would take more than half the row; wider graphs push their own
+	// row's text further right.
+	graphW := 0
+	for _, r := range rows {
+		if r.kind == rowItem && r.index < len(l.lanes) {
+			graphW = max(graphW, len(l.lanes[r.index]))
+		}
+	}
+	graphW = min(graphW, width/2)
 	lines := make([]string, 0, len(rows))
 	for _, r := range rows {
-		lines = append(lines, l.renderRow(st, paints, r, width, focused))
+		lines = append(lines, l.renderRow(st, paints, r, width, graphW, focused))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func (l *logList) renderRow(st theme.Styles, paints []lanePaint, r listRow, width int, focused bool) string {
+func (l *logList) renderRow(st theme.Styles, paints []paint, r listRow, width, graphW int, focused bool) string {
 	switch r.kind {
 	case rowHeader:
 		n := strconv.Itoa(r.count)
@@ -73,7 +83,8 @@ func (l *logList) renderRow(st theme.Styles, paints []lanePaint, r listRow, widt
 		}
 		var lanes string
 		if r.index < len(l.lanes) {
-			lanes = renderGraph(paints, l.lanes[r.index]) + "  "
+			cells := l.lanes[r.index]
+			lanes = renderGraph(paints, cells) + strings.Repeat(" ", max(0, graphW-len(cells))) + "  "
 		}
 		line := lanes + st.CommitHash.Render(sanitize(c.Hash)) + "  " + refLabels(st, c.Refs) + subject.Render(sanitize(c.Subject))
 		return ansi.Truncate(prefix+line, width, "…")

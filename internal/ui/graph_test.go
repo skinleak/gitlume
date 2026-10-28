@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/skinleak/gitlume/internal/git"
 	"github.com/skinleak/gitlume/internal/ui/theme"
 )
@@ -44,7 +46,7 @@ func TestLayoutGraph(t *testing.T) {
 		{
 			name:    "merge",
 			commits: commits("m:t,f", "t:o", "f:o", "o:"),
-			want:    []string{"●─╮", "● │", "│ ●", "●─╯"},
+			want:    []string{"○─╮", "● │", "│ ●", "●─╯"},
 		},
 		{
 			name:    "two tips fork from one commit",
@@ -54,12 +56,12 @@ func TestLayoutGraph(t *testing.T) {
 		{
 			name:    "merge into a lane on the left crosses a passing lane",
 			commits: commits("y:c", "z:b", "x:a,c"),
-			want:    []string{"●", "│ ●", "├─│─●"},
+			want:    []string{"●", "│ ●", "├─│─○"},
 		},
 		{
 			name:    "fork and merge on the same side share the line",
 			commits: commits("p:q", "r:q", "q:s,t"),
-			want:    []string{"●", "│ ●", "●─┴─╮"},
+			want:    []string{"●", "│ ●", "○─┴─╮"},
 		},
 		{
 			name:    "a parent beyond the loaded page keeps its lane",
@@ -83,10 +85,41 @@ func TestLayoutGraphColors(t *testing.T) {
 		return out
 	}
 	// The merged branch keeps one color from where it starts to where it
-	// forks off; the main line keeps the other.
-	for i, want := range [][]int32{{0, 1, 1}, {0, -1, 1}, {0, -1, 1}, {0, 1, 1}} {
+	// forks off; the main line keeps the other. Without HEAD, no lane gets
+	// HEAD's color.
+	for i, want := range [][]int32{{1, 2, 2}, {1, -1, 2}, {1, -1, 2}, {1, 2, 2}} {
 		if got := color(rows[i]); !slices.Equal(got, want) {
 			t.Errorf("row %d colors = %v, want %v", i, got, want)
+		}
+	}
+
+	// HEAD's line has headColor from HEAD down, and a ◉; a branch ahead of
+	// HEAD keeps its own color above it.
+	cs := commits("a:h", "h:o", "o:")
+	cs[1].Refs = []string{"HEAD -> refs/heads/main"}
+	rows = layoutGraph(cs)
+	if got := graphText(rows); !slices.Equal(got, []string{"●", "◉", "●"}) {
+		t.Errorf("HEAD graph = %q", got)
+	}
+	for i, want := range []int32{1, headColor, headColor} {
+		if got := rows[i][0].color; got != want {
+			t.Errorf("row %d color = %d, want %d", i, got, want)
+		}
+	}
+}
+
+func TestLogColumnsAlign(t *testing.T) {
+	st := theme.Default()
+	cs := commits("a:o", "b:o", "o:")
+	var l logList
+	l.setHeight(10)
+	l.set(cs, layoutGraph(cs), false)
+	// The graphs "●", "│ ●" and "●─╯" are 1, 3 and 3 cells wide; every
+	// hash starts after the widest: "› " + 3 cells + "  ".
+	lines := strings.Split(ansi.Strip(l.view(st, 80, true)), "\n")[1:]
+	for i, c := range cs {
+		if got := ansi.StringWidth(lines[i][:strings.Index(lines[i], c.Hash+"  ")]); got != 7 {
+			t.Errorf("row %d: hash at column %d, want 7:\n%s", i, got, strings.Join(lines, "\n"))
 		}
 	}
 }
@@ -95,7 +128,7 @@ func TestRenderGraphMatchesLipGloss(t *testing.T) {
 	withColors(t)
 	st := theme.Default()
 	row := layoutGraph(commits("m:t,f", "t:o", "f:o", "o:"))[0]
-	want := st.Lanes[0].Render("●") + st.Lanes[1].Render("─╮")
+	want := st.Lanes[1].Render("○") + st.Lanes[2].Render("─╮")
 	if got := renderGraph(lanePaints(st), row); got != want {
 		t.Errorf("renderGraph = %q, want %q", got, want)
 	}

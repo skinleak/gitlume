@@ -210,10 +210,11 @@ func (r *Repo) Checkout(ctx context.Context, b BranchRef) error {
 // callers can tell local from remote branches. statWidth is the width
 // git lays the diffstat out for. Output is capped at MaxDiffBytes.
 func (r *Repo) Show(ctx context.Context, hash string, statWidth int) (Diff, error) {
-	res, err := r.read(ctx, invocation{args: []string{
+	args := append([]string{
 		"show", "--no-show-signature", "--no-color", "--no-ext-diff", "--decorate=full", "--abbrev-commit", "-M",
-		"--stat=" + strconv.Itoa(max(40, statWidth)), "--patch", "--format=medium", hash, "--",
-	}, limit: MaxDiffBytes})
+		"--stat=" + strconv.Itoa(max(40, statWidth)), "--patch", "--format=medium",
+	}, diffPrefixes...)
+	res, err := r.read(ctx, invocation{args: append(args, hash, "--"), limit: MaxDiffBytes})
 	if err != nil {
 		return Diff{}, err
 	}

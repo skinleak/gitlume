@@ -99,14 +99,15 @@ func (l *fileList) view(st theme.Styles, width int, focused bool) string {
 		return st.Muted.Render("Working tree clean")
 	}
 	rows := l.visible()
+	dir, text := paintOf(st.Muted), paintOf(st.Text)
 	lines := make([]string, 0, len(rows))
 	for _, r := range rows {
-		lines = append(lines, l.renderRow(st, r, width, focused))
+		lines = append(lines, l.renderRow(st, dir, text, r, width, focused))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func (l *fileList) renderRow(st theme.Styles, r listRow, width int, focused bool) string {
+func (l *fileList) renderRow(st theme.Styles, dir, text paint, r listRow, width int, focused bool) string {
 	switch r.kind {
 	case rowHeader:
 		g := l.items[r.index].Group
@@ -116,14 +117,38 @@ func (l *fileList) renderRow(st theme.Styles, r listRow, width int, focused bool
 		name := truncateLeft(displayPath(c), width-4)
 		code := string(displayCode(c.Code))
 		if r.index != l.cursor {
-			return "  " + codeStyle(st, c.Code).Render(code) + " " + st.Text.Render(name)
+			return "  " + codeStyle(st, c.Code).Render(code) + " " + pathView(dir, text, name)
 		}
 		if focused {
 			return st.Cursor.Render("› " + code + " " + name)
 		}
-		return st.Muted.Render("› ") + codeStyle(st, c.Code).Render(code) + " " + st.Text.Render(name)
+		return st.Muted.Render("› ") + codeStyle(st, c.Code).Render(code) + " " + pathView(dir, text, name)
 	}
 	return ""
+}
+
+// paint is the escape codes a style puts around text. Rendering a style
+// once per frame and wrapping text in its codes is much cheaper than a
+// Render per row or per colored run, and gives the same output for the
+// plain color and bold styles used here.
+type paint struct{ open, close string }
+
+func paintOf(s lipgloss.Style) paint {
+	var p paint
+	p.open, p.close, _ = strings.Cut(s.Render("\x00"), "\x00")
+	return p
+}
+
+func (p paint) render(s string) string { return p.open + s + p.close }
+
+// pathView renders a path with its directories in dir, so the file names
+// stand out.
+func pathView(dir, name paint, p string) string {
+	i := strings.LastIndexByte(p, '/') + 1
+	if i == 0 {
+		return name.render(p)
+	}
+	return dir.render(p[:i]) + name.render(p[i:])
 }
 
 func displayPath(c git.Change) string {

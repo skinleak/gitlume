@@ -73,7 +73,8 @@ internal/ui/
                          `request` cancels a superseded load's git process
   list.go                sectionList[T]: sectioned rows, cursor, scrolling (shared)
   status.go              fileList: change rows and selection restore
-  diff.go                diffView: renders only visible lines, truncates (never wraps)
+  diff.go                diffView: renders only visible lines, truncates (never wraps);
+                         tidyPatch: one header line per file instead of git's
   branches.go            branchList + commitsView: the branch list (`b`) over files or log
   log.go                 logList (the log `2`: all branches as a graph) and commit-header styling
   graph.go               lane layout and rendering for the log's graph
@@ -153,7 +154,8 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   colors carry git meaning only (added/current/ahead green, removed/behind
   red, modified/hashes/warnings yellow, remotes purple). The one exception
   is the graph's lanes, which cycle through `Palette.Lanes` so branches can
-  be told apart.
+  be told apart; the first, the accent, is reserved for HEAD's line
+  (`headColor`). Directories are muted next to bright file names.
 - **Status letters follow GitHub/VS Code, not raw git:** untracked shows `U`
   and conflicts `!` (`displayCode`). `git.Change.Code` keeps git's letters;
   only the UI maps them.
@@ -215,8 +217,18 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   Patch lines keep the cheap truncate-then-style path.
 - **User config can inject lines into machine output.** `log.showSignature`
   adds signature lines to `git log --format=...`, which broke parsing, so
-  `Log` and `Show` pass `--no-show-signature`. Check new commands against
-  config that changes output, not just flags.
+  `Log` and `Show` pass `--no-show-signature`. `diff.noprefix` and
+  `diff.mnemonicPrefix` change the `a/`/`b/` path prefixes `tidyPatch`
+  reads, so `Diff` and `Show` pin them (`diffPrefixes`). Check new commands
+  against config that changes output, not just flags.
+- **Patches are tidied in the background** (`tidyPatch`, after
+  `splitDiff`): each file's `diff --git`/`index`/`---`/`+++`/mode/rename
+  lines become one `fileHead` (name, note, +/- counts), with a blank line
+  between files. It tracks header and hunk state, so a removed line that
+  starts with `--` stays red; `styleDiffLine` no longer special-cases
+  `---`/`+++`. Unknown header lines are kept. A truncated patch shows no
+  counts for its last file. Combined diffs (`diff --cc`, `@@@`) have one
+  +/- column per parent.
 - **Lip Gloss renders no colors in tests** (no terminal), so a style
   assertion is trivially true. Call `withColors(t)` in tests that compare
   styles, and check a test fails without its fix.
@@ -228,9 +240,13 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   `--date-order` guarantees children come first. A commit's parents that
   lie beyond the loaded page just leave lanes running off the bottom.
 - **`%D` lists `refs/remotes/<remote>/HEAD`**, which `refLabels` leaves out.
-- **Graph rows are painted with raw escape codes** (`lanePaints`), taken
-  from rendering each lane style once per frame. A `Render` per colored run
-  made a 40-lane frame 5× slower.
+- **Graph rows and file list rows are painted with raw escape codes**
+  (`paint`, `paintOf`), taken from rendering each style once per frame. A
+  `Render` per colored run made a 40-lane frame 5× slower, and one per
+  muted directory made the file list frame 1.5× slower.
+- **Log rows line up after the widest graph on screen** (`graphW`), capped
+  at half the row so one very wide merge can't push every subject off.
+  Nodes are `◉` HEAD, `○` merge, `●` other.
 - **Destructive questions confirm only on `y`**, never on `enter`, so a
   stray keypress can't discard work.
 - **The diff cache has a 32 MiB budget** (`maxDiffCacheBytes`) and is cleared
@@ -295,10 +311,10 @@ this range:
 | Path | Cost | Runs on |
 |---|---|---|
 | Parse a 50k-entry status | ~10 ms | background |
-| Keypress + file list frame with 50k files | ~70 µs | UI goroutine |
+| Keypress + file list frame with 50k files | ~50 µs | UI goroutine |
 | Keypress + full frame at 220×60 with 50k files and a diff | ~0.2 ms | UI goroutine |
 | One frame of a 1 MiB diff | ~50 µs, independent of diff size | UI goroutine |
-| `splitDiff` of a 1 MiB diff | ~4 ms | background |
+| `splitDiff` + `tidyPatch` of a 1 MiB diff | ~5 ms | background |
 | `layoutGraph` of 3,000 commits on 40 lanes | ~2 ms | background |
 | Keypress + log list frame of that graph | ~0.3 ms | UI goroutine |
 
@@ -336,6 +352,8 @@ Unreleased (next: `v0.4.0`): the log and the graph merged into one tab:
 the graph of all branches with hashes, next to the selected commit's
 details and diff. The branch view is no longer a tab but a list opened
 with `b` over files or the log. Two tabs remain: files `1`, log `2`.
+UI polish: one header line per file in diffs, muted directories, graph
+columns aligned, `◉`/`○` nodes and HEAD's line in the accent color.
 Check `git ls-remote --tags origin` before picking a version; the roadmap
 can lag behind the tags.
 

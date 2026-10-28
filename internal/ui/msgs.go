@@ -105,11 +105,13 @@ func loadDiff(ctx context.Context, repo *git.Repo, seq int, c git.Change) tea.Cm
 		if err != nil {
 			return diffLoadedMsg{seq: seq, key: keyOf(c), err: err}
 		}
+		lines, heads := tidyPatch(splitDiff(d.Text), d.Truncated)
 		content := diffContent{
-			lines:     splitDiff(d.Text),
+			lines:     lines,
 			truncated: d.Truncated,
 			note:      d.Note,
 			size:      len(d.Text),
+			heads:     heads,
 		}
 		return diffLoadedMsg{seq: seq, key: keyOf(c), content: content}
 	}
@@ -165,7 +167,12 @@ func loadShow(ctx context.Context, repo *git.Repo, seq int, hash string, statWid
 				break
 			}
 		}
-		content := diffContent{lines: lines, truncated: d.Truncated, size: len(d.Text), header: header}
+		patch, heads := tidyPatch(lines[header:], d.Truncated)
+		for i := range heads {
+			heads[i].line += header
+		}
+		lines = append(lines[:header:header], patch...)
+		content := diffContent{lines: lines, truncated: d.Truncated, size: len(d.Text), header: header, heads: heads}
 		return diffLoadedMsg{seq: seq, key: key, content: content}
 	}
 }
