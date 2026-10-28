@@ -21,7 +21,6 @@ type KeyMap struct {
 	Files      key.Binding
 	Branches   key.Binding
 	Log        key.Binding
-	Graph      key.Binding
 	PrevView   key.Binding
 	NextView   key.Binding
 	ScrollUp   key.Binding
@@ -102,10 +101,6 @@ func Default() KeyMap {
 			key.WithKeys("3"),
 			key.WithHelp("3", "log"),
 		),
-		Graph: key.NewBinding(
-			key.WithKeys("4"),
-			key.WithHelp("4", "graph"),
-		),
 		PrevView: key.NewBinding(
 			key.WithKeys("left"),
 			key.WithHelp("←", "previous tab"),
@@ -184,11 +179,6 @@ func (k KeyMap) LogHelp() []key.Binding {
 	return []key.Binding{k.Open, k.ScrollDown, k.ScrollUp, k.Focus, k.Help, k.Quit}
 }
 
-// GraphHelp is the footer hint in the graph view.
-func (k KeyMap) GraphHelp() []key.Binding {
-	return []key.Binding{k.ScrollDown, k.ScrollUp, k.Refresh, k.Help, k.Quit}
-}
-
 // DiffHelp is the footer hint while a diff is shown fullscreen.
 func (k KeyMap) DiffHelp() []key.Binding {
 	return []key.Binding{k.Down, k.Up, k.ScrollDown, k.ScrollUp, k.Back, k.Help}
@@ -199,7 +189,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Focus, k.ScrollUp, k.ScrollDown, k.Open, k.Back},
 		{k.Toggle, k.StageAll, k.Discard, k.DiscardAll, k.Commit, k.Refresh},
-		{k.Files, k.Branches, k.Log, k.Graph, k.PrevView, k.NextView, k.Checkout, k.Help, k.Quit},
+		{k.Files, k.Branches, k.Log, k.PrevView, k.NextView, k.Checkout, k.Help, k.Quit},
 	}
 }
 

@@ -3,36 +3,31 @@ package ui
 import (
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/skinleak/gitlume/internal/git"
 	"github.com/skinleak/gitlume/internal/ui/theme"
 )
 
-// logList is a commit history, newest first: HEAD's for the log view, or
-// every branch's with lanes for the graph view. It is loaded in pages of
-// limit commits; more is true while git may have older commits than were
-// loaded.
+// logList is the history of every branch, newest first, drawn as a graph.
+// It is loaded in pages of limit commits; more is true while git may have
+// older commits than were loaded.
 type logList struct {
 	sectionList[git.Commit]
-	graph  bool
-	lanes  [][]graphCell // one row per commit, graph only
+	lanes  [][]graphCell // one row per commit
 	seq    int
 	req    request // the running load
 	limit  int     // commits requested from git; grows by logPage
 	loaded bool
 	more   bool
-	now    time.Time // when the list was loaded; ages are relative to it
 }
 
 // set replaces the commits, keeping the cursor on the same commit.
-func (l *logList) set(cs []git.Commit, lanes [][]graphCell, more bool, now time.Time) {
+func (l *logList) set(cs []git.Commit, lanes [][]graphCell, more bool) {
 	prev, hadPrev := l.selected()
 	l.setItems(cs, func(a, b git.Commit) bool { return true })
-	l.lanes, l.more, l.now, l.loaded = lanes, more, now, true
+	l.lanes, l.more, l.loaded = lanes, more, true
 	cursor := 0
 	for i, c := range cs {
 		if hadPrev && c.Hash == prev.Hash {
@@ -51,10 +46,7 @@ func (l *logList) view(st theme.Styles, width int, focused bool) string {
 		return st.Muted.Render("No commits yet")
 	}
 	rows := l.visible()
-	var paints []lanePaint
-	if l.graph {
-		paints = lanePaints(st)
-	}
+	paints := lanePaints(st)
 	lines := make([]string, 0, len(rows))
 	for _, r := range rows {
 		lines = append(lines, l.renderRow(st, paints, r, width, focused))
@@ -69,11 +61,7 @@ func (l *logList) renderRow(st theme.Styles, paints []lanePaint, r listRow, widt
 		if l.more {
 			n += "+"
 		}
-		title := "Commits"
-		if l.graph {
-			title = "All branches"
-		}
-		return st.Section.Render(title) + "  " + st.Muted.Render(n)
+		return st.Section.Render("All branches") + "  " + st.Muted.Render(n)
 	case rowItem:
 		c := l.items[r.index]
 		prefix, subject := "  ", st.Text
@@ -83,22 +71,14 @@ func (l *logList) renderRow(st theme.Styles, paints []lanePaint, r listRow, widt
 				prefix, subject = st.Cursor.Render("› "), st.Cursor
 			}
 		}
-		if l.graph && r.index < len(l.lanes) {
-			line := renderGraph(paints, l.lanes[r.index]) + "  " + refLabels(st, c.Refs) + subject.Render(sanitize(c.Subject))
-			return ansi.Truncate(prefix+line, width, "…")
+		var lanes string
+		if r.index < len(l.lanes) {
+			lanes = renderGraph(paints, l.lanes[r.index]) + "  "
 		}
-		return ansi.Truncate(prefix+commitLine(st, c, l.now, subject), width, "…")
+		line := lanes + st.CommitHash.Render(sanitize(c.Hash)) + "  " + refLabels(st, c.Refs) + subject.Render(sanitize(c.Subject))
+		return ansi.Truncate(prefix+line, width, "…")
 	}
 	return ""
-}
-
-// commitLine renders "hash  age  subject", the row format shared by the
-// log and the branch view's commit pane.
-func commitLine(st theme.Styles, c git.Commit, now time.Time, subject lipgloss.Style) string {
-	ago := age(now.Sub(c.Date))
-	return st.CommitHash.Render(sanitize(c.Hash)) + "  " +
-		st.Subtle.Render(ago+strings.Repeat(" ", max(0, 3-len(ago)))) + "  " +
-		subject.Render(sanitize(c.Subject))
 }
 
 // styleCommitLine styles one line of the part of `git show` output before
