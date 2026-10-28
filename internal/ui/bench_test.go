@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -85,13 +84,13 @@ func BenchmarkLayoutGraph(b *testing.B) {
 	}
 }
 
-// BenchmarkGraphMoveAndView is one keypress in that graph.
-func BenchmarkGraphMoveAndView(b *testing.B) {
+// BenchmarkLogMoveAndView is one keypress in that graph.
+func BenchmarkLogMoveAndView(b *testing.B) {
 	st := theme.Default()
 	cs := wideHistory(10 * logPage)
-	l := logList{graph: true}
+	var l logList
 	l.setHeight(50)
-	l.set(cs, layoutGraph(cs), false, time.Now())
+	l.set(cs, layoutGraph(cs), false)
 	b.ReportAllocs()
 	for b.Loop() {
 		if !l.move(1) {

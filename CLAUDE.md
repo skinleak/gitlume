@@ -39,7 +39,7 @@ messages and often says "you decide". Follow this without being told:
 
 ```sh
 go build ./...
-go test ./...          # ~1s; integration tests create temp repos and need git
+go test ./...          # ~5s; integration tests create temp repos and need git
 go vet ./...
 gofmt -l .             # must print nothing
 go run ./cmd/gitlume   # run inside any git repo
@@ -75,8 +75,8 @@ internal/ui/
   status.go              fileList: change rows and selection restore
   diff.go                diffView: renders only visible lines, truncates (never wraps)
   branches.go            branchList + commitsView for the branch view (`2`)
-  log.go                 logList (log `3` and graph `4`) and commit-header styling
-  graph.go               lane layout and rendering for the graph view
+  log.go                 logList (the log `3`: all branches as a graph) and commit-header styling
+  graph.go               lane layout and rendering for the log's graph
   commit.go              commit prompt (textinput)
   confirm.go             y/n question guarding destructive operations
   help.go                help overlay generated from keys.KeyMap
@@ -115,18 +115,15 @@ tools/preview/           drives the real Model through a script, writes docs/pre
    branch's commits load like diffs: debounced, `commitSeq`-checked, cached
    per ref and cleared with each branch reload. The files view requests its
    diff again when it is shown.
-6. The log view (`3`) loads HEAD's history in pages of `logPage` commits
-   (`logSeq`); the next page loads when the cursor nears the end. The
-   selected commit is shown in the diff pane through the same
-   `requestDiff`/`diffCache` path as file diffs, keyed by
-   `diffKey{commit: hash}`; `diffTarget()` decides what the pane shows.
-   The graph view (`4`) is a second `logList` (`graph: true`) over all
-   local and remote branches plus HEAD, and it is the whole page: no
-   details pane, no diffstat, so `diffTarget()` has nothing for it and the
-   page keys move the cursor. `loadGraph` lays out its lanes
-   (`layoutGraph`) in the background along with the load; `View` only
-   styles the cells of visible rows. `Model.history()` is the list of
-   whichever of the two views is shown; each keeps its own `seq` and `limit`.
+6. The log view (`3`) is the history of all local and remote branches
+   plus HEAD, drawn as a graph, loaded in pages of `logPage` commits
+   (`logList.seq`); the next page loads when the cursor nears the end.
+   `loadLog` lays out the lanes (`layoutGraph`) in the background along
+   with the load; `View` only styles the cells of visible rows. Each row
+   is lanes, hash, refs and subject. The selected commit is shown in the
+   diff pane through the same `requestDiff`/`diffCache` path as file
+   diffs, keyed by `diffKey{commit: hash}`; `diffTarget()` decides what
+   the pane shows. `Model.history()` is the log's list while it is shown.
 7. Mutations go through `startOp`. Only one runs at a time (`busy`), so
    commands never fight over `index.lock`. `opDoneMsg` always triggers a
    refresh, even after an error.
@@ -221,9 +218,9 @@ tools/preview/           drives the real Model through a script, writes docs/pre
 - **Lip Gloss renders no colors in tests** (no terminal), so a style
   assertion is trivially true. Call `withColors(t)` in tests that compare
   styles, and check a test fails without its fix.
-- **`git log HEAD` fails on an unborn branch**, so `reloadLog` skips git
-  there and shows "No commits yet". The graph leaves HEAD out instead and
-  still shows the other branches.
+- **`git log HEAD` fails on an unborn branch**, so the log leaves HEAD
+  out there (`Repo.Graph`'s `head`) and still shows the other branches.
+  Only a repository without any commits shows "No commits yet".
 - **The graph needs full hashes and child-before-parent order.** Lanes are
   linked by `%H`/`%P` (abbreviations can differ in length), and
   `--date-order` guarantees children come first. A commit's parents that
@@ -238,16 +235,17 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   on every status refresh.
 - **`sectionList` builds `rows`/`rowOf` once in `setItems`.** Never rebuild
   them per keypress or frame; repos with huge untracked trees can have tens
-  of thousands of rows. Every list view (files, branches, log, graph)
-  embeds it and only adds rendering and selection restore.
+  of thousands of rows. Every list view (files, branches, log) embeds
+  it and only adds rendering and selection restore.
 - **`View` assembles the frame line by line** (`bodyLines`, `fit`) from
   parts already cut to their width. Lip Gloss's `Width`, `Height`,
   `Padding` and `Join*` measure every cell of the frame again; they made a
   frame 3× slower and allocated 520 KB. Lines are not padded on the right:
   Bubble Tea's renderer erases the rest of each line itself.
 - **`resize` sizes every view, not only the shown one**, because switching
-  views doesn't resize. The graph is always the whole body, even when the
-  other views stack their panes on narrow terminals.
+  views doesn't resize. Only list widths differ between views (the log's
+  list gets `logListShare` of the width for its lanes, hash and refs), and
+  they are applied in `View`, so the heights `resize` sets fit every view.
 - **Polling sleeps in `tea.Tick`**, so code that drives the model
   synchronously (tests, `tools/preview`) must use `New(repo).WithoutPolling()`
   and send `pollTickMsg` itself when it wants a poll.
@@ -300,7 +298,7 @@ this range:
 | One frame of a 1 MiB diff | ~50 µs, independent of diff size | UI goroutine |
 | `splitDiff` of a 1 MiB diff | ~4 ms | background |
 | `layoutGraph` of 3,000 commits on 40 lanes | ~2 ms | background |
-| Keypress + frame of that graph | ~0.3 ms | UI goroutine |
+| Keypress + log list frame of that graph | ~0.3 ms | UI goroutine |
 
 Anything proportional to repo or diff size belongs in a `tea.Cmd`, not in
 `Update` or `View`. Background polling must stay under ~2% of a core
@@ -328,12 +326,16 @@ full-page graph of all branches (`4`).
 
 Released as `v0.2.0`: switching tabs with `←`/`→`.
 
-Unreleased (next: `v0.3.0`): background status polling, coalesced
-refreshes, cancelled stale loads, a 3× cheaper frame, and the fixes from
-the reliability review. Check `git ls-remote --tags origin` before
+Released as `v0.3.0`: background status polling, coalesced refreshes,
+cancelled stale loads, a 3× cheaper frame, and the fixes from the
+reliability review.
+
+Unreleased (next: `v0.4.0`): the log and the graph merged into one tab
+(`3`): the graph of all branches with hashes, next to the selected
+commit's details and diff; `4` is gone. Check `git ls-remote --tags origin` before
 picking a version; the roadmap can lag behind the tags.
 
 Each view gets its own model file in `internal/ui` and its own git
 functions + tests in `internal/git`. There is nothing planned beyond this;
 new features come from the owner. The views are deliberately few, so think
-twice before suggesting a fifth tab.
+twice before suggesting a fourth tab.

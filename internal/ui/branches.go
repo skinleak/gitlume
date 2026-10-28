@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/skinleak/gitlume/internal/git"
@@ -204,4 +205,13 @@ func (v *commitsView) view(st theme.Styles, width int) string {
 		out = append(out, ansi.Truncate(commitLine(st, c, v.now, st.Text), width, "…"))
 	}
 	return strings.Join(out, "\n")
+}
+
+// commitLine renders "hash  age  subject", a row of the branch view's
+// commit pane.
+func commitLine(st theme.Styles, c git.Commit, now time.Time, subject lipgloss.Style) string {
+	ago := age(now.Sub(c.Date))
+	return st.CommitHash.Render(sanitize(c.Hash)) + "  " +
+		st.Subtle.Render(ago+strings.Repeat(" ", max(0, 3-len(ago)))) + "  " +
+		subject.Render(sanitize(c.Subject))
 }

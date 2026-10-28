@@ -63,15 +63,13 @@ type commitsLoadedMsg struct {
 	err     error
 }
 
-// logLoadedMsg carries the first limit commits of HEAD, or of all branches
-// with their graph lanes.
+// logLoadedMsg carries the first limit commits of all branches with their
+// graph lanes.
 type logLoadedMsg struct {
 	seq     int
-	graph   bool
 	commits []git.Commit
 	lanes   [][]graphCell
 	limit   int
-	now     time.Time
 	err     error
 }
 
@@ -138,19 +136,12 @@ func loadCommits(ctx context.Context, repo *git.Repo, seq int, ref string) tea.C
 	}
 }
 
-func loadLog(ctx context.Context, repo *git.Repo, seq, limit int) tea.Cmd {
-	return func() tea.Msg {
-		cs, err := repo.Log(ctx, "HEAD", limit)
-		return logLoadedMsg{seq: seq, commits: cs, limit: limit, now: time.Now(), err: err}
-	}
-}
-
-// loadGraph loads all branches' history and lays out its lanes. head adds
+// loadLog loads all branches' history and lays out its lanes. head adds
 // HEAD, which an unborn branch doesn't have.
-func loadGraph(ctx context.Context, repo *git.Repo, seq, limit int, head bool) tea.Cmd {
+func loadLog(ctx context.Context, repo *git.Repo, seq, limit int, head bool) tea.Cmd {
 	return func() tea.Msg {
 		cs, err := repo.Graph(ctx, limit, head)
-		msg := logLoadedMsg{seq: seq, graph: true, commits: cs, limit: limit, now: time.Now(), err: err}
+		msg := logLoadedMsg{seq: seq, commits: cs, limit: limit, err: err}
 		if err == nil {
 			msg.lanes = layoutGraph(cs)
 		}

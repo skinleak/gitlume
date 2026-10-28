@@ -7,7 +7,7 @@ the history with a graph of every branch, and switch branches. No
 boxes, no clutter: one accent color, generous spacing, and keybindings you
 can discover with `?`.
 
-![gitlume: browsing changes, viewing a diff, staging, committing, the log, the graph and switching branches](docs/preview.svg)
+![gitlume: browsing changes, viewing a diff, staging, committing, the log with its graph of all branches and switching branches](docs/preview.svg)
 
 ## Install
 
@@ -23,16 +23,16 @@ Run `gitlume` anywhere inside a git work tree.
 
 | Key              | Action                                |
 | ---------------- | ------------------------------------- |
-| `j` / `k`, `↓` `↑` | Move through files (or scroll the diff) |
+| `j` / `k`, `↓` `↑` | Move through files or commits (or scroll the diff) |
 | `tab`            | Switch focus between files and diff   |
 | `ctrl+d` / `ctrl+u` | Scroll the diff by half a page      |
-| `enter`          | View the selected diff fullscreen (`esc` to go back) |
+| `enter`          | View the selected diff or commit fullscreen (`esc` to go back) |
 | `space`          | Stage or unstage the selected file    |
 | `a`              | Stage everything                      |
 | `d`              | Discard all changes to the selected file (asks first) |
 | `D`              | Discard all uncommitted changes, including untracked files (asks first) |
 | `c`              | Commit (`enter` to confirm, `esc` to cancel) |
-| `1` / `2` / `3` / `4` | Switch between files, branches, the log and a full-page graph of all branches |
+| `1` / `2` / `3`  | Switch between files, branches and the log: a graph of all branches next to the selected commit's files and diff |
 | `←` / `→`        | Previous / next tab (wraps around)    |
 | `enter` (branches) | Check out the selected branch (a remote branch gets a local tracking branch) |
 | `r`              | Refresh                               |
@@ -84,5 +84,5 @@ tools/preview/        records the README clip from the real UI
 
 ## Roadmap
 
-Done: status, diff, stage, discard, commit, the branch view, the log and
-the graph.
+Done: status, diff, stage, discard, commit, the branch view, and the log
+with its graph of all branches.

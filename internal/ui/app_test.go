@@ -126,7 +126,7 @@ func TestViewFitsWindow(t *testing.T) {
 	m, _ := newTestModel(t)
 	for _, size := range [][2]int{{100, 30}, {60, 20}, {200, 50}, {30, 8}, {20, 4}, {10, 2}} {
 		m = pump(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm", "branches", "log", "log zoom", "graph"} {
+		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm", "branches", "log", "log zoom"} {
 			mm := m
 			switch mode {
 			case "help":
@@ -148,8 +148,6 @@ func TestViewFitsWindow(t *testing.T) {
 			case "log zoom":
 				mm = pump(t, mm, keyPress("3"))
 				mm = pump(t, mm, keyPress("enter"))
-			case "graph":
-				mm = pump(t, mm, keyPress("4"))
 			}
 			lines := strings.Split(plainView(mm), "\n")
 			if len(lines) != size[1] {
@@ -566,7 +564,7 @@ func TestLogView(t *testing.T) {
 	m = pump(t, m, keyPress("3"))
 	v := plainView(m)
 	for _, want := range []string{
-		"3 Log", "Commits  2", "second commit", "init",
+		"3 Log", "All branches  2", "second commit", "init",
 		"(HEAD → main)", "Author: Test", " a.txt | 1 +", " b.txt | 2 +-", "diff --git a/a.txt",
 	} {
 		if !strings.Contains(v, want) {
@@ -595,7 +593,7 @@ func TestLogLoadsMoreWhenNearTheEnd(t *testing.T) {
 	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "third")
 	m.log.limit = 1
 	m = pump(t, m, keyPress("3"))
-	if len(m.log.items) != 1 || !strings.Contains(plainView(m), "Commits  1+") {
+	if len(m.log.items) != 1 || !strings.Contains(plainView(m), "All branches  1+") {
 		t.Fatalf("first page: %d commits:\n%s", len(m.log.items), plainView(m))
 	}
 	m = pump(t, m, keyPress("j"))
@@ -609,24 +607,31 @@ func TestLogOnUnbornBranch(t *testing.T) {
 	gitRun(t, dir, "checkout", "-q", "--orphan", "fresh")
 	m = pump(t, m, keyPress("r"))
 	m = pump(t, m, keyPress("3"))
+	// HEAD has no commits, but the other branches still show.
+	if v := plainView(m); !strings.Contains(v, "All branches  1") || !strings.Contains(v, "main init") || m.isErr {
+		t.Errorf("log on an unborn branch:\n%s", v)
+	}
+
+	m = newEmptyModel(t, "empty")
+	m = pump(t, m, keyPress("3"))
 	if v := plainView(m); !strings.Contains(v, "No commits yet") || m.isErr {
-		t.Errorf("unborn log:\n%s", v)
+		t.Errorf("log of an empty repository:\n%s", v)
 	}
 }
 
 func TestArrowsSwitchTabs(t *testing.T) {
 	m, _ := newTestModel(t)
 	right, left := tea.KeyMsg{Type: tea.KeyRight}, tea.KeyMsg{Type: tea.KeyLeft}
-	for _, want := range []viewKind{viewBranches, viewLog, viewGraph, viewFiles} {
+	for _, want := range []viewKind{viewBranches, viewLog, viewFiles} {
 		if m = pump(t, m, right); m.view != want {
 			t.Fatalf("→: view %d, want %d", m.view, want)
 		}
 	}
-	if m = pump(t, m, left); m.view != viewGraph {
-		t.Errorf("← from files should wrap to the graph, got view %d", m.view)
+	if m = pump(t, m, left); m.view != viewLog {
+		t.Errorf("← from files should wrap to the log, got view %d", m.view)
 	}
 	if v := plainView(m); !strings.Contains(v, "All branches") {
-		t.Errorf("← did not load the graph:\n%s", v)
+		t.Errorf("← did not load the log:\n%s", v)
 	}
 
 	// While typing a commit message the arrows move the text cursor.
@@ -645,7 +650,7 @@ func TestArrowsSwitchTabs(t *testing.T) {
 	}
 }
 
-func TestGraphView(t *testing.T) {
+func TestLogGraph(t *testing.T) {
 	m, dir := newTestModel(t)
 	gitRun(t, dir, "stash", "-q")
 	gitRun(t, dir, "switch", "-q", "-c", "feat")
@@ -654,34 +659,50 @@ func TestGraphView(t *testing.T) {
 	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "main work")
 	gitRun(t, dir, "merge", "-q", "--no-ff", "--no-edit", "feat")
 	m = pump(t, m, keyPress("r"))
-	m = pump(t, m, keyPress("4"))
+	m = pump(t, m, keyPress("3"))
+	if len(m.log.items) != 4 {
+		t.Fatalf("log has %d commits, want 4", len(m.log.items))
+	}
+	hash := func(i int) string { return m.log.items[i].Hash }
 	v := plainView(m)
+	// Each row: lanes, hash, refs, subject. The selected commit's details
+	// show next to the graph.
 	for _, want := range []string{
-		"4 Graph", "All branches  4",
-		"› ●─╮  main Merge branch 'feat'",
-		"│ ●  feat feat work", "●─╯  init",
+		"All branches  4",
+		"› ●─╮  " + hash(0) + "  main Merge branch 'feat'",
+		"│ ●  " + hash(2) + "  feat feat work",
+		"●─╯  " + hash(3) + "  init",
+		"Merge: ", "Author: Test",
 	} {
 		if !strings.Contains(v, want) {
-			t.Errorf("graph view missing %q:\n%s", want, v)
+			t.Errorf("log missing %q:\n%s", want, v)
 		}
 	}
-	// The graph is the whole page: no commit details, no diffstat.
-	m = pump(t, m, keyPress("enter"))
-	for _, unwanted := range []string{"Author:", "Merge:", "changed", "diff --git"} {
-		if strings.Contains(plainView(m), unwanted) || m.zoomed {
-			t.Errorf("graph view shows %q:\n%s", unwanted, plainView(m))
-		}
+	if strings.Contains(v, "Graph") {
+		t.Errorf("the graph tab is still shown:\n%s", v)
 	}
-	m = pump(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
-	if c, _ := m.graph.selected(); c.Subject != "init" {
-		t.Errorf("ctrl+d should page the cursor down, got %q", c.Subject)
+	if next, _ := m.Update(keyPress("4")); next.(Model).view != viewLog {
+		t.Error("4 still switches views")
 	}
 
-	// On an unborn branch the other branches still show.
-	gitRun(t, dir, "checkout", "-q", "--orphan", "fresh")
+	m = pump(t, m, keyPress("j"))
+	m = pump(t, m, keyPress("j"))
+	if v := plainView(m); !strings.Contains(v, "    feat work") {
+		t.Errorf("details did not follow the cursor:\n%s", v)
+	}
+}
+
+func TestLogListIsWider(t *testing.T) {
+	m, dir := newTestModel(t)
+	subject := "Explain why the cache keeps hourly forecasts"
+	gitRun(t, dir, "commit", "-q", "-am", subject)
+	m = pump(t, m, tea.WindowSizeMsg{Width: 140, Height: 30})
 	m = pump(t, m, keyPress("r"))
-	if v := plainView(m); !strings.Contains(v, "All branches  4") || m.isErr {
-		t.Errorf("graph on an unborn branch:\n%s", v)
+	m = pump(t, m, keyPress("3"))
+	// The file list's width would cut the row off after the hash and refs.
+	// The details pane shows the subject too, so look for the row.
+	if v := plainView(m); !strings.Contains(v, "main "+subject) {
+		t.Errorf("subject cut off in a 140-wide log:\n%s", v)
 	}
 }
 
@@ -738,20 +759,6 @@ func TestAge(t *testing.T) {
 	}
 }
 
-func TestGraphFillsNarrowWindow(t *testing.T) {
-	m, dir := newTestModel(t)
-	for i := range 30 {
-		gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "c"+strconv.Itoa(i))
-	}
-	m = pump(t, m, tea.WindowSizeMsg{Width: 60, Height: 20}) // stacked panes
-	m = pump(t, m, keyPress("r"))
-	m = pump(t, m, keyPress("4"))
-	// The graph is the whole page at every width: header, then commits.
-	if n := strings.Count(plainView(m), "●"); n != 20-chromeHeight-1 {
-		t.Errorf("graph shows %d commits in a 20-line window, want %d:\n%s", n, 20-chromeHeight-1, plainView(m))
-	}
-}
-
 func TestTabSwitchNeverShowsOtherViewsDiff(t *testing.T) {
 	m, dir := newTestModel(t)
 	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "second")
@@ -789,13 +796,16 @@ func TestHookOutputSanitizedInStatusLine(t *testing.T) {
 	}
 }
 
-func TestHeaderSanitizesRepoName(t *testing.T) {
+// newEmptyModel opens a new repository without commits in a directory
+// called name.
+func newEmptyModel(t *testing.T, name string) Model {
+	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
 	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
-	dir := filepath.Join(t.TempDir(), "evil\x1b[2Jrepo")
+	dir := filepath.Join(t.TempDir(), name)
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -806,7 +816,11 @@ func TestHeaderSanitizesRepoName(t *testing.T) {
 	}
 	m := New(repo).WithoutPolling()
 	m = pump(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
-	m = drain(t, m, m.Init())
+	return drain(t, m, m.Init())
+}
+
+func TestHeaderSanitizesRepoName(t *testing.T) {
+	m := newEmptyModel(t, "evil\x1b[2Jrepo")
 	if v := m.View(); strings.Contains(v, "\x1b[2J") || !strings.Contains(ansi.Strip(v), "evil?[2Jrepo") {
 		t.Errorf("repo name not sanitized in the header:\n%q", v)
 	}
