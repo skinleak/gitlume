@@ -12,9 +12,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/muesli/termenv"
 
 	"github.com/skinleak/gitlume/internal/git"
+	"github.com/skinleak/gitlume/internal/ui/theme"
 )
 
 func newTestModel(t *testing.T) (Model, string) {
@@ -79,6 +82,12 @@ func drain(t *testing.T, m Model, cmd tea.Cmd) Model {
 	t.Helper()
 	for steps := 0; cmd != nil && steps < 8; steps++ {
 		msg := cmd()
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range batch {
+				m = drain(t, m, c)
+			}
+			return m
+		}
 		if msg == nil {
 			return m
 		}
@@ -117,7 +126,7 @@ func TestViewFitsWindow(t *testing.T) {
 	m, _ := newTestModel(t)
 	for _, size := range [][2]int{{100, 30}, {60, 20}, {200, 50}, {30, 8}, {20, 4}, {10, 2}} {
 		m = pump(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm", "branches"} {
+		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm", "branches", "log", "log zoom"} {
 			mm := m
 			switch mode {
 			case "help":
@@ -134,6 +143,11 @@ func TestViewFitsWindow(t *testing.T) {
 				mm = pump(t, mm, keyPress("D"))
 			case "branches":
 				mm = pump(t, mm, keyPress("2"))
+			case "log":
+				mm = pump(t, mm, keyPress("3"))
+			case "log zoom":
+				mm = pump(t, mm, keyPress("3"))
+				mm = pump(t, mm, keyPress("enter"))
 			}
 			lines := strings.Split(plainView(mm), "\n")
 			if len(lines) != size[1] {
@@ -209,6 +223,22 @@ func TestGitErrorShownInStatusLine(t *testing.T) {
 	m = pump(t, m, keyPress(" "))
 	if !m.isErr || !strings.Contains(m.message, "index.lock") {
 		t.Errorf("expected lock error in status line:\n%s", plainView(m))
+	}
+}
+
+func TestDiffFromPreviousViewDropped(t *testing.T) {
+	m, _ := newTestModel(t)
+	seq := m.diffSeq
+	// The stale reply arrives after the switch but before the log loads.
+	next, loadLog := m.Update(keyPress("3"))
+	m = pump(t, next.(Model), diffLoadedMsg{seq: seq, key: diffKey{group: git.Unstaged, path: "a.txt"},
+		content: diffContent{lines: []string{"+stale file diff"}}})
+	if strings.Contains(plainView(m), "stale file diff") {
+		t.Errorf("a file diff from the files view reached the log:\n%s", plainView(m))
+	}
+	m = drain(t, m, loadLog)
+	if !strings.Contains(plainView(m), "Author: Test") {
+		t.Errorf("log details missing after the log loaded:\n%s", plainView(m))
 	}
 }
 
@@ -524,6 +554,94 @@ func TestStatusLetters(t *testing.T) {
 		if got := displayCode(code); got != want {
 			t.Errorf("displayCode(%c) = %c, want %c", code, got, want)
 		}
+	}
+}
+
+func TestLogView(t *testing.T) {
+	m, dir := newTestModel(t)
+	gitRun(t, dir, "commit", "-q", "-am", "second commit")
+	m = pump(t, m, keyPress("r"))
+	m = pump(t, m, keyPress("3"))
+	v := plainView(m)
+	for _, want := range []string{
+		"3 Log", "Commits  2", "second commit", "init",
+		"(HEAD → main)", "Author: Test", " a.txt | 1 +", " b.txt | 2 +-", "diff --git a/a.txt",
+	} {
+		if !strings.Contains(v, want) {
+			t.Errorf("log view missing %q:\n%s", want, v)
+		}
+	}
+
+	m = pump(t, m, keyPress("j"))
+	if v := plainView(m); !strings.Contains(v, "    init") {
+		t.Errorf("details did not follow the cursor:\n%s", v)
+	}
+	m = pump(t, m, keyPress("enter"))
+	if !m.zoomed || !strings.Contains(plainView(m), "Author: Test") {
+		t.Errorf("enter should show the commit fullscreen:\n%s", plainView(m))
+	}
+	m = pump(t, m, keyPress("esc"))
+	m = pump(t, m, keyPress("1"))
+	if v := plainView(m); !strings.Contains(v, "Working tree clean") {
+		t.Errorf("files view after the log:\n%s", v)
+	}
+}
+
+func TestLogLoadsMoreWhenNearTheEnd(t *testing.T) {
+	m, dir := newTestModel(t)
+	gitRun(t, dir, "commit", "-q", "-am", "second")
+	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "third")
+	m.logLimit = 1
+	m = pump(t, m, keyPress("3"))
+	if len(m.log.items) != 1 || !strings.Contains(plainView(m), "Commits  1+") {
+		t.Fatalf("first page: %d commits:\n%s", len(m.log.items), plainView(m))
+	}
+	m = pump(t, m, keyPress("j"))
+	if len(m.log.items) != 3 || m.log.more {
+		t.Errorf("after paging: %d commits, more = %v; want 3, false", len(m.log.items), m.log.more)
+	}
+}
+
+func TestLogOnUnbornBranch(t *testing.T) {
+	m, dir := newTestModel(t)
+	gitRun(t, dir, "checkout", "-q", "--orphan", "fresh")
+	m = pump(t, m, keyPress("r"))
+	m = pump(t, m, keyPress("3"))
+	if v := plainView(m); !strings.Contains(v, "No commits yet") || m.isErr {
+		t.Errorf("unborn log:\n%s", v)
+	}
+}
+
+// withColors makes Lip Gloss emit ANSI colors, which it otherwise skips
+// when the output is not a terminal, so tests can tell styles apart.
+func withColors(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.ANSI)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+}
+
+func TestStyleCommitLine(t *testing.T) {
+	withColors(t)
+	st := theme.Default()
+	tests := []struct{ in, want string }{
+		{"commit abc1234 (HEAD -> refs/heads/main, refs/remotes/origin/main, tag: refs/tags/v1)",
+			"commit abc1234 (HEAD → main, origin/main, tag: v1)"},
+		{"commit abc1234", "commit abc1234"},
+		{" ui/app.go | 12 +++++---", " ui/app.go | 12 +++++---"},
+		{" logo.png  | Bin 0 -> 12 bytes", " logo.png  | Bin 0 -> 12 bytes"},
+	}
+	for _, tt := range tests {
+		if got := ansi.Strip(styleCommitLine(st, tt.in)); got != tt.want {
+			t.Errorf("styleCommitLine(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+	if got := styleCommitLine(st, "Author: a | b <x@y>"); !strings.HasPrefix(got, st.Muted.Render("Author:")) {
+		t.Errorf("author line with a pipe styled as a diffstat: %q", got)
+	}
+	// The graph is split into an added and a removed run.
+	got := styleStatLine(st, " a | 3 ++-")
+	if !strings.Contains(got, st.DiffAdd.Render("++")) || !strings.Contains(got, st.DiffDel.Render("-")) {
+		t.Errorf("stat graph not colored: %q", got)
 	}
 }
 

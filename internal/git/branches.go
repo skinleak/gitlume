@@ -113,7 +113,8 @@ type Commit struct {
 // Log returns the most recent n commits reachable from ref, newest first.
 func (r *Repo) Log(ctx context.Context, ref string, n int) ([]Commit, error) {
 	res, err := r.read(ctx, invocation{args: []string{
-		"log", "-n", strconv.Itoa(n), "--no-color", "--format=%h%x00%ct%x00%s", ref, "--",
+		// log.showSignature would add verification lines to the output.
+		"log", "--no-show-signature", "-n", strconv.Itoa(n), "--no-color", "--format=%h%x00%ct%x00%s", ref, "--",
 	}})
 	if err != nil {
 		return nil, err
@@ -151,4 +152,25 @@ func (r *Repo) Checkout(ctx context.Context, b BranchRef) error {
 		return r.write(ctx, invocation{args: []string{"switch", "-q", "--track", b.Name}})
 	}
 	return r.write(ctx, invocation{args: []string{"switch", "-q", b.Name}})
+}
+
+// Show returns a commit's header, message, diffstat and patch, as
+// `git show` prints them. Refs are decorated in full (refs/heads/...) so
+// callers can tell local from remote branches. statWidth is the width
+// git lays the diffstat out for. Output is capped at MaxDiffBytes.
+func (r *Repo) Show(ctx context.Context, hash string, statWidth int) (Diff, error) {
+	res, err := r.read(ctx, invocation{args: []string{
+		"show", "--no-show-signature", "--no-color", "--no-ext-diff", "--decorate=full", "--abbrev-commit", "-M",
+		"--stat=" + strconv.Itoa(max(40, statWidth)), "--patch", "--format=medium", hash, "--",
+	}, limit: MaxDiffBytes})
+	if err != nil {
+		return Diff{}, err
+	}
+	out := res.stdout
+	if res.truncated {
+		if i := bytes.LastIndexByte(out, '\n'); i >= 0 {
+			out = out[:i+1]
+		}
+	}
+	return Diff{Text: string(out), Truncated: res.truncated}, nil
 }

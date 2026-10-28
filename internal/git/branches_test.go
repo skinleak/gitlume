@@ -2,6 +2,8 @@ package git
 
 import (
 	"context"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -161,5 +163,48 @@ func TestBranchesOnUnbornRepo(t *testing.T) {
 	}
 	if b := branchNamed(t, bs, "main"); b.Current {
 		t.Error("main must not be current on an orphan branch")
+	}
+}
+
+func TestLogIgnoresShowSignature(t *testing.T) {
+	r := newTestRepo(t)
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("ssh-keygen not installed")
+	}
+	key := filepath.Join(t.TempDir(), "key")
+	if out, err := exec.Command("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", key).CombinedOutput(); err != nil {
+		t.Fatalf("ssh-keygen: %v\n%s", err, out)
+	}
+	gitCmd(t, r.Root(), "config", "gpg.format", "ssh")
+	gitCmd(t, r.Root(), "config", "user.signingkey", key)
+	gitCmd(t, r.Root(), "commit", "-q", "-S", "--allow-empty", "-m", "signed")
+	// Without an allowed signers file git still prints a verification line.
+	gitCmd(t, r.Root(), "config", "log.showSignature", "true")
+
+	log, err := r.Log(context.Background(), "HEAD", 10)
+	if err != nil || len(log) != 2 || log[0].Subject != "signed" {
+		t.Fatalf("Log with log.showSignature = %+v, %v", log, err)
+	}
+}
+
+func TestShow(t *testing.T) {
+	r := newTestRepo(t)
+	writeFile(t, r.Root(), "tracked.txt", "one\ntwo\n")
+	gitCmd(t, r.Root(), "commit", "-q", "-am", "second line")
+
+	log, err := r.Log(context.Background(), "HEAD", 10)
+	if err != nil || len(log) != 2 {
+		t.Fatalf("Log = %+v, %v", log, err)
+	}
+	d, err := r.Show(context.Background(), log[0].Hash, 80)
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	for _, want := range []string{
+		"(HEAD -> refs/heads/main)", "    second line", " tracked.txt | 1 +", "diff --git", "+two",
+	} {
+		if !strings.Contains(d.Text, want) {
+			t.Errorf("Show output missing %q:\n%s", want, d.Text)
+		}
 	}
 }

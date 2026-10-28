@@ -9,11 +9,13 @@ import (
 	"github.com/skinleak/gitlume/internal/ui/theme"
 )
 
-// diffKey identifies the diff of one change. The same path can have a
-// staged and an unstaged diff, so the group is part of the key.
+// diffKey identifies what the diff pane shows: the diff of one change, or
+// one commit of the log. The same path can have a staged and an unstaged
+// diff, so the group is part of the key.
 type diffKey struct {
-	group git.Group
-	path  string
+	group  git.Group
+	path   string
+	commit string // set for a commit; group and path are then unused
 }
 
 func keyOf(c git.Change) diffKey { return diffKey{group: c.Group, path: c.Path} }
@@ -24,6 +26,7 @@ type diffContent struct {
 	truncated bool
 	note      string // shown instead of lines when there is no patch
 	size      int    // bytes of patch text, for the cache budget
+	header    int    // lines before the patch: a commit's message and diffstat
 }
 
 // diffView is a minimal scroller over diff lines. Only visible lines are
@@ -78,6 +81,11 @@ func (d *diffView) view(st theme.Styles, width int) string {
 	for i := d.offset; i < end; i++ {
 		if i == len(d.lines) {
 			out = append(out, st.Muted.Render("… diff truncated"))
+			continue
+		}
+		if i < d.header {
+			// Styled first: refs are shortened while styling.
+			out = append(out, ansi.Truncate(styleCommitLine(st, d.lines[i]), width, ""))
 			continue
 		}
 		out = append(out, styleDiffLine(st, ansi.Truncate(d.lines[i], width, "")))

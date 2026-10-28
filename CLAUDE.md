@@ -36,7 +36,7 @@ internal/git/            UI-free git wrapper; everything here is unit-testable
   status.go              porcelain v2 -z parser; Status.Changes(group)
   diff.go                per-change diff, capped at MaxDiffBytes
   ops.go                 Stage, Unstage, StageAll, Commit, Discard, DiscardAll
-  branches.go            for-each-ref and log parsers; Branches, Log, Checkout
+  branches.go            for-each-ref and log parsers; Branches, Log, Show, Checkout
 internal/ui/
   app.go                 root Model: key routing, layout, header/footer, async orchestration
   msgs.go                tea.Msg types + tea.Cmd constructors wrapping internal/git
@@ -44,6 +44,7 @@ internal/ui/
   status.go              fileList: change rows and selection restore
   diff.go                diffView: renders only visible lines, truncates (never wraps)
   branches.go            branchList + commitsView for the branch view (`2`)
+  log.go                 logList and commit-header styling for the log view (`3`)
   commit.go              commit prompt (textinput)
   confirm.go             y/n question guarding destructive operations
   help.go                help overlay generated from keys.KeyMap
@@ -67,7 +68,12 @@ tools/preview/           drives the real Model through a script, writes docs/pre
    branch's commits load like diffs: debounced, `commitSeq`-checked, cached
    per ref and cleared with each branch reload. The files view requests its
    diff again when it is shown.
-5. Mutations go through `startOp`. Only one runs at a time (`busy`), so
+5. The log view (`3`) loads HEAD's history in pages of `logPage` commits
+   (`logSeq`); the next page loads when the cursor nears the end. The
+   selected commit is shown in the diff pane through the same
+   `requestDiff`/`diffCache` path as file diffs, keyed by
+   `diffKey{commit: hash}`; `diffTarget()` decides what the pane shows.
+6. Mutations go through `startOp`. Only one runs at a time (`busy`), so
    commands never fight over `index.lock`. `opDoneMsg` always triggers a
    refresh, even after an error.
 
@@ -148,6 +154,19 @@ tools/preview/           drives the real Model through a script, writes docs/pre
 - **Remote checkout uses `git switch --track <remote>/<name>`.** When a local
   branch of that name already exists, the UI switches to it instead
   (`branchList.localFor`), because git would refuse to create it again.
+- **Commit details are `git show --decorate=full`.** Full ref names tell
+  local from remote branches; `styleRefs` shortens them while styling, so
+  header lines are styled first and truncated after (`diffContent.header`).
+  Patch lines keep the cheap truncate-then-style path.
+- **User config can inject lines into machine output.** `log.showSignature`
+  adds signature lines to `git log --format=...`, which broke parsing, so
+  `Log` and `Show` pass `--no-show-signature`. Check new commands against
+  config that changes output, not just flags.
+- **Lip Gloss renders no colors in tests** (no terminal), so a style
+  assertion is trivially true. Call `withColors(t)` in tests that compare
+  styles, and check a test fails without its fix.
+- **`git log HEAD` fails on an unborn branch**, so `reloadLog` skips git
+  there and shows "No commits yet".
 - **Destructive questions confirm only on `y`**, never on `enter`, so a
   stray keypress can't discard work.
 - **The diff cache has a 32 MiB budget** (`maxDiffCacheBytes`) and is cleared
@@ -194,6 +213,6 @@ Anything proportional to repo or diff size belongs in a `tea.Cmd`, not in
 
 Done: milestone 1 (status, diff, stage/unstage, stage all, commit, help),
 discard (file and all, behind a y/n question), fullscreen diff (`enter`),
-branch view with checkout (`2`). Next: log view (`3`). Each view gets its
-own model file in `internal/ui` and its own git functions + tests in
+branch view with checkout (`2`), log view (`3`). Each view gets its own
+model file in `internal/ui` and its own git functions + tests in
 `internal/git`.

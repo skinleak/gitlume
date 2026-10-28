@@ -201,11 +201,7 @@ func (v *commitsView) view(st theme.Styles, width int) string {
 	end := min(len(v.commits), v.offset+v.height)
 	out := make([]string, 0, end-v.offset)
 	for _, c := range v.commits[v.offset:end] {
-		ago := age(v.now.Sub(c.Date))
-		line := st.CommitHash.Render(sanitize(c.Hash)) + "  " +
-			st.Subtle.Render(ago+strings.Repeat(" ", max(0, 3-len(ago)))) + "  " +
-			st.Text.Render(sanitize(c.Subject))
-		out = append(out, ansi.Truncate(line, width, "…"))
+		out = append(out, ansi.Truncate(commitLine(st, c, v.now, st.Text), width, "…"))
 	}
 	return strings.Join(out, "\n")
 }

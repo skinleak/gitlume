@@ -20,6 +20,7 @@ type KeyMap struct {
 	Checkout   key.Binding
 	Files      key.Binding
 	Branches   key.Binding
+	Log        key.Binding
 	ScrollUp   key.Binding
 	ScrollDown key.Binding
 	Refresh    key.Binding
@@ -94,6 +95,10 @@ func Default() KeyMap {
 			key.WithKeys("2"),
 			key.WithHelp("2", "branches"),
 		),
+		Log: key.NewBinding(
+			key.WithKeys("3"),
+			key.WithHelp("3", "log"),
+		),
 		ScrollUp: key.NewBinding(
 			key.WithKeys("ctrl+u", "pgup"),
 			key.WithHelp("ctrl+u", "page up"),
@@ -159,6 +164,11 @@ func (k KeyMap) BranchHelp() []key.Binding {
 	return []key.Binding{k.Checkout, k.Files, k.Refresh, k.Help, k.Quit}
 }
 
+// LogHelp is the footer hint in the log view.
+func (k KeyMap) LogHelp() []key.Binding {
+	return []key.Binding{k.Open, k.ScrollDown, k.ScrollUp, k.Focus, k.Help, k.Quit}
+}
+
 // DiffHelp is the footer hint while a diff is shown fullscreen.
 func (k KeyMap) DiffHelp() []key.Binding {
 	return []key.Binding{k.Down, k.Up, k.ScrollDown, k.ScrollUp, k.Back, k.Help}
@@ -169,7 +179,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Focus, k.ScrollUp, k.ScrollDown, k.Open, k.Back},
 		{k.Toggle, k.StageAll, k.Discard, k.DiscardAll, k.Commit, k.Refresh},
-		{k.Files, k.Branches, k.Checkout, k.Help, k.Quit},
+		{k.Files, k.Branches, k.Log, k.Checkout, k.Help, k.Quit},
 	}
 }
 

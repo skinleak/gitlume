@@ -54,6 +54,15 @@ type commitsLoadedMsg struct {
 	err     error
 }
 
+// logLoadedMsg carries the first limit commits of HEAD.
+type logLoadedMsg struct {
+	seq     int
+	commits []git.Commit
+	limit   int
+	now     time.Time
+	err     error
+}
+
 // opDoneMsg reports the end of a mutating git operation.
 type opDoneMsg struct {
 	info string // shown on success; empty for silent operations
@@ -105,6 +114,34 @@ func loadCommits(repo *git.Repo, seq int, ref string) tea.Cmd {
 	return func() tea.Msg {
 		cs, err := repo.Log(context.Background(), ref, branchLogLength)
 		return commitsLoadedMsg{seq: seq, ref: ref, commits: cs, err: err}
+	}
+}
+
+func loadLog(repo *git.Repo, seq, limit int) tea.Cmd {
+	return func() tea.Msg {
+		cs, err := repo.Log(context.Background(), "HEAD", limit)
+		return logLoadedMsg{seq: seq, commits: cs, limit: limit, now: time.Now(), err: err}
+	}
+}
+
+// loadShow loads one commit for the diff pane; statWidth is the pane width.
+func loadShow(repo *git.Repo, seq int, hash string, statWidth int) tea.Cmd {
+	return func() tea.Msg {
+		key := diffKey{commit: hash}
+		d, err := repo.Show(context.Background(), hash, statWidth)
+		if err != nil {
+			return diffLoadedMsg{seq: seq, key: key, err: err}
+		}
+		lines := splitDiff(d.Text)
+		header := len(lines)
+		for i, l := range lines {
+			if strings.HasPrefix(l, "diff --") {
+				header = i
+				break
+			}
+		}
+		content := diffContent{lines: lines, truncated: d.Truncated, size: len(d.Text), header: header}
+		return diffLoadedMsg{seq: seq, key: key, content: content}
 	}
 }
 
