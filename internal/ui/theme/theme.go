@@ -15,6 +15,8 @@ type Palette struct {
 	Added   lipgloss.TerminalColor
 	Removed lipgloss.TerminalColor
 	Error   lipgloss.TerminalColor
+	Warning lipgloss.TerminalColor
+	Remote  lipgloss.TerminalColor
 }
 
 // The bright ANSI colors (SGR 90–97).
@@ -22,7 +24,9 @@ const (
 	brightBlack  = lipgloss.Color("8")
 	brightRed    = lipgloss.Color("9")
 	brightGreen  = lipgloss.Color("10")
+	brightYellow = lipgloss.Color("11")
 	brightBlue   = lipgloss.Color("12")
+	brightPurple = lipgloss.Color("13")
 	brightWhite  = lipgloss.Color("15")
 	regularBlack = lipgloss.Color("0")
 )
@@ -39,6 +43,8 @@ func DefaultPalette() Palette {
 		Added:   brightGreen,
 		Removed: brightRed,
 		Error:   brightRed,
+		Warning: brightYellow,
+		Remote:  brightPurple,
 	}
 }
 
@@ -62,9 +68,29 @@ type Styles struct {
 	Info    lipgloss.Style
 	Prompt  lipgloss.Style
 	Confirm lipgloss.Style
-	HelpKey lipgloss.Style
-	HelpDsc lipgloss.Style
-	HelpSep lipgloss.Style
+
+	// Status letters in the file list, colored like GitHub and VS Code.
+	StatusNew      lipgloss.Style
+	StatusModified lipgloss.Style
+	StatusDeleted  lipgloss.Style
+	StatusConflict lipgloss.Style
+
+	// Branch view, colored like git's own output: current branch green,
+	// ahead green, behind red, commit hashes yellow. Remotes are purple
+	// rather than git's red, which gitlume reserves for removals.
+	BranchCurrent lipgloss.Style
+	BranchRemote  lipgloss.Style
+	Ahead         lipgloss.Style
+	Behind        lipgloss.Style
+	Gone          lipgloss.Style
+	CommitHash    lipgloss.Style
+
+	Tab       lipgloss.Style
+	TabActive lipgloss.Style
+	TabKey    lipgloss.Style
+	HelpKey   lipgloss.Style
+	HelpDsc   lipgloss.Style
+	HelpSep   lipgloss.Style
 }
 
 // New builds Styles from a Palette.
@@ -89,9 +115,25 @@ func New(p Palette) Styles {
 		Info:    s().Foreground(p.Muted),
 		Prompt:  s().Foreground(p.Accent).Bold(true),
 		Confirm: s().Foreground(p.Error).Bold(true),
-		HelpKey: s().Foreground(p.Accent),
-		HelpDsc: s().Foreground(p.Muted),
-		HelpSep: s().Foreground(p.Subtle).Faint(true),
+
+		StatusNew:      s().Foreground(p.Added),
+		StatusModified: s().Foreground(p.Warning),
+		StatusDeleted:  s().Foreground(p.Removed),
+		StatusConflict: s().Foreground(p.Error).Bold(true),
+
+		BranchCurrent: s().Foreground(p.Added).Bold(true),
+		BranchRemote:  s().Foreground(p.Remote),
+		Ahead:         s().Foreground(p.Added),
+		Behind:        s().Foreground(p.Removed),
+		Gone:          s().Foreground(p.Warning),
+		CommitHash:    s().Foreground(p.Warning),
+
+		Tab:       s().Foreground(p.Muted),
+		TabActive: s().Foreground(p.Text).Bold(true),
+		TabKey:    s().Foreground(p.Subtle).Faint(true),
+		HelpKey:   s().Foreground(p.Accent),
+		HelpDsc:   s().Foreground(p.Muted),
+		HelpSep:   s().Foreground(p.Subtle).Faint(true),
 	}
 }
 

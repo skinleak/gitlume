@@ -17,6 +17,9 @@ type KeyMap struct {
 	Focus      key.Binding
 	Open       key.Binding
 	Back       key.Binding
+	Checkout   key.Binding
+	Files      key.Binding
+	Branches   key.Binding
 	ScrollUp   key.Binding
 	ScrollDown key.Binding
 	Refresh    key.Binding
@@ -49,7 +52,7 @@ func Default() KeyMap {
 		),
 		Toggle: key.NewBinding(
 			key.WithKeys(" "),
-			key.WithHelp("space", "stage / unstage"),
+			key.WithHelp("space", "stage/unstage"),
 		),
 		StageAll: key.NewBinding(
 			key.WithKeys("a"),
@@ -57,7 +60,7 @@ func Default() KeyMap {
 		),
 		Discard: key.NewBinding(
 			key.WithKeys("d"),
-			key.WithHelp("d", "discard file"),
+			key.WithHelp("d", "discard"),
 		),
 		DiscardAll: key.NewBinding(
 			key.WithKeys("D"),
@@ -73,19 +76,31 @@ func Default() KeyMap {
 		),
 		Open: key.NewBinding(
 			key.WithKeys("enter"),
-			key.WithHelp("enter", "view diff"),
+			key.WithHelp("enter", "diff"),
 		),
 		Back: key.NewBinding(
 			key.WithKeys("esc"),
 			key.WithHelp("esc", "back"),
 		),
+		Checkout: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "checkout"),
+		),
+		Files: key.NewBinding(
+			key.WithKeys("1"),
+			key.WithHelp("1", "files"),
+		),
+		Branches: key.NewBinding(
+			key.WithKeys("2"),
+			key.WithHelp("2", "branches"),
+		),
 		ScrollUp: key.NewBinding(
 			key.WithKeys("ctrl+u", "pgup"),
-			key.WithHelp("ctrl+u", "scroll diff up"),
+			key.WithHelp("ctrl+u", "page up"),
 		),
 		ScrollDown: key.NewBinding(
 			key.WithKeys("ctrl+d", "pgdown"),
-			key.WithHelp("ctrl+d", "scroll diff down"),
+			key.WithHelp("ctrl+d", "page down"),
 		),
 		Refresh: key.NewBinding(
 			key.WithKeys("r"),
@@ -131,9 +146,17 @@ func DefaultConfirm() ConfirmKeyMap {
 	}
 }
 
+// The footer hints below are ordered by importance: when the terminal is
+// too narrow, hints are dropped from the right, except the last two.
+
 // ShortHelp is the one-line hint shown in the footer.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Toggle, k.StageAll, k.Discard, k.DiscardAll, k.Commit, k.Open, k.Help, k.Quit}
+	return []key.Binding{k.Toggle, k.StageAll, k.Commit, k.Discard, k.DiscardAll, k.Open, k.Help, k.Quit}
+}
+
+// BranchHelp is the footer hint in the branch view.
+func (k KeyMap) BranchHelp() []key.Binding {
+	return []key.Binding{k.Checkout, k.Files, k.Refresh, k.Help, k.Quit}
 }
 
 // DiffHelp is the footer hint while a diff is shown fullscreen.
@@ -146,7 +169,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Focus, k.ScrollUp, k.ScrollDown, k.Open, k.Back},
 		{k.Toggle, k.StageAll, k.Discard, k.DiscardAll, k.Commit, k.Refresh},
-		{k.Help, k.Quit},
+		{k.Files, k.Branches, k.Checkout, k.Help, k.Quit},
 	}
 }
 

@@ -14,6 +14,7 @@ go vet ./...
 gofmt -l .             # must print nothing
 go run ./cmd/gitlume   # run inside any git repo
 go test -run '^$' -bench . ./internal/...   # hot-path benchmarks
+go run ./tools/preview # regenerate docs/preview.svg (README clip)
 ```
 
 Definition of done for any change: `gofmt -l .` is empty and `go vet`,
@@ -35,16 +36,20 @@ internal/git/            UI-free git wrapper; everything here is unit-testable
   status.go              porcelain v2 -z parser; Status.Changes(group)
   diff.go                per-change diff, capped at MaxDiffBytes
   ops.go                 Stage, Unstage, StageAll, Commit, Discard, DiscardAll
+  branches.go            for-each-ref and log parsers; Branches, Log, Checkout
 internal/ui/
   app.go                 root Model: key routing, layout, header/footer, async orchestration
   msgs.go                tea.Msg types + tea.Cmd constructors wrapping internal/git
-  status.go              fileList: grouped rows, cursor, scrolling, selection restore
+  list.go                sectionList[T]: sectioned rows, cursor, scrolling (shared)
+  status.go              fileList: change rows and selection restore
   diff.go                diffView: renders only visible lines, truncates (never wraps)
+  branches.go            branchList + commitsView for the branch view (`2`)
   commit.go              commit prompt (textinput)
   confirm.go             y/n question guarding destructive operations
   help.go                help overlay generated from keys.KeyMap
   theme/                 the ONLY place colors and lipgloss styles are defined
   keys/                  the ONLY place keybindings are defined
+tools/preview/           drives the real Model through a script, writes docs/preview.svg
 ```
 
 ### Data flow
@@ -57,7 +62,12 @@ internal/ui/
    schedules a 30 ms debounced `diffTickMsg`, and that triggers `loadDiff`.
    Results whose `seq` doesn't match are dropped, and the old diff stays
    visible until the new one arrives, so there's no flicker.
-4. Mutations go through `startOp`. Only one runs at a time (`busy`), so
+4. The branch view (`2`) loads branches every time it is shown and after
+   every status refresh while it is visible (`branchSeq`). The selected
+   branch's commits load like diffs: debounced, `commitSeq`-checked, cached
+   per ref and cleared with each branch reload. The files view requests its
+   diff again when it is shown.
+5. Mutations go through `startOp`. Only one runs at a time (`busy`), so
    commands never fight over `index.lock`. `opDoneMsg` always triggers a
    refresh, even after an error.
 
@@ -80,7 +90,12 @@ internal/ui/
   it up.
 - **Keep the look calm:** no borders or boxes, one accent color, spacing
   instead of separators. Colors are bright ANSI indices (SGR 90–97) so the
-  terminal theme decides the exact shades.
+  terminal theme decides the exact shades. Blue is the UI accent; the other
+  colors carry git meaning only (added/current/ahead green, removed/behind
+  red, modified/hashes/warnings yellow, remotes purple).
+- **Status letters follow GitHub/VS Code, not raw git:** untracked shows `U`
+  and conflicts `!` (`displayCode`). `git.Change.Code` keeps git's letters;
+  only the UI maps them.
 - **No global mutable state.** Everything hangs off `Model` or `Repo`.
 - **Write a test for every new parser.** Capture real git output from a temp
   repo for fixtures rather than writing it from memory; format details such
@@ -128,13 +143,25 @@ internal/ui/
   there. A staged rename must be restored together with its source path,
   even from the unstaged row. `git reset --hard` does work on an unborn
   branch, so `DiscardAll` needs no special case.
+- **Branch ages are relative to `branchList.now`**, captured when the list
+  loads, so `View` never calls `time.Now()` and frames are deterministic.
+- **Remote checkout uses `git switch --track <remote>/<name>`.** When a local
+  branch of that name already exists, the UI switches to it instead
+  (`branchList.localFor`), because git would refuse to create it again.
 - **Destructive questions confirm only on `y`**, never on `enter`, so a
   stray keypress can't discard work.
 - **The diff cache has a 32 MiB budget** (`maxDiffCacheBytes`) and is cleared
   on every status refresh.
-- **`fileList` builds `rows`/`rowOf` once in `setChanges`.** Never rebuild
+- **`sectionList` builds `rows`/`rowOf` once in `setItems`.** Never rebuild
   them per keypress or frame; repos with huge untracked trees can have tens
-  of thousands of rows.
+  of thousands of rows. Every list view (files, branches, the log later)
+  embeds it and only adds rendering and selection restore.
+- **Footer hints are ordered by importance.** `Model.hints` drops them from
+  the right when they don't fit but always keeps the last two (help and
+  quit/back), so put new bindings where they rank, not at the end.
+- **Regenerate the README clip after visible UI changes** with
+  `go run ./tools/preview`, and look at it: the script presses keys blindly,
+  so a changed sort order or binding silently records the wrong thing.
 
 ## Performance budget
 
@@ -166,6 +193,7 @@ Anything proportional to repo or diff size belongs in a `tea.Cmd`, not in
 ## Roadmap
 
 Done: milestone 1 (status, diff, stage/unstage, stage all, commit, help),
-discard (file and all, behind a y/n question), fullscreen diff (`enter`).
-Next: log view, then branches. Each gets its own model file in `internal/ui`
-and its own git functions + tests in `internal/git`.
+discard (file and all, behind a y/n question), fullscreen diff (`enter`),
+branch view with checkout (`2`). Next: log view (`3`). Each view gets its
+own model file in `internal/ui` and its own git functions + tests in
+`internal/git`.

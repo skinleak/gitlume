@@ -34,6 +34,26 @@ type diffLoadedMsg struct {
 	err     error
 }
 
+// branchesLoadedMsg carries the branch list. now is when it was loaded,
+// so ages render the same in every frame.
+type branchesLoadedMsg struct {
+	seq      int
+	branches []git.BranchRef
+	now      time.Time
+	err      error
+}
+
+// commitsTickMsg fires after the debounce delay for commits request seq.
+type commitsTickMsg struct{ seq int }
+
+// commitsLoadedMsg carries the recent commits of ref.
+type commitsLoadedMsg struct {
+	seq     int
+	ref     string
+	commits []git.Commit
+	err     error
+}
+
 // opDoneMsg reports the end of a mutating git operation.
 type opDoneMsg struct {
 	info string // shown on success; empty for silent operations
@@ -64,6 +84,27 @@ func loadDiff(repo *git.Repo, seq int, c git.Change) tea.Cmd {
 			size:      len(d.Text),
 		}
 		return diffLoadedMsg{seq: seq, key: keyOf(c), content: content}
+	}
+}
+
+// branchLogLength is how many commits the branch view shows per branch.
+const branchLogLength = 100
+
+func loadBranches(repo *git.Repo, seq int) tea.Cmd {
+	return func() tea.Msg {
+		bs, err := repo.Branches(context.Background())
+		return branchesLoadedMsg{seq: seq, branches: bs, now: time.Now(), err: err}
+	}
+}
+
+func commitsTick(seq int) tea.Cmd {
+	return tea.Tick(diffDebounce, func(time.Time) tea.Msg { return commitsTickMsg{seq: seq} })
+}
+
+func loadCommits(repo *git.Repo, seq int, ref string) tea.Cmd {
+	return func() tea.Msg {
+		cs, err := repo.Log(context.Background(), ref, branchLogLength)
+		return commitsLoadedMsg{seq: seq, ref: ref, commits: cs, err: err}
 	}
 }
 

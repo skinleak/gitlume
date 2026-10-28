@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
@@ -116,7 +117,7 @@ func TestViewFitsWindow(t *testing.T) {
 	m, _ := newTestModel(t)
 	for _, size := range [][2]int{{100, 30}, {60, 20}, {200, 50}, {30, 8}, {20, 4}, {10, 2}} {
 		m = pump(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm"} {
+		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm", "branches"} {
 			mm := m
 			switch mode {
 			case "help":
@@ -131,6 +132,8 @@ func TestViewFitsWindow(t *testing.T) {
 				mm = pump(t, mm, keyPress("?"))
 			case "confirm":
 				mm = pump(t, mm, keyPress("D"))
+			case "branches":
+				mm = pump(t, mm, keyPress("2"))
 			}
 			lines := strings.Split(plainView(mm), "\n")
 			if len(lines) != size[1] {
@@ -223,7 +226,8 @@ func TestStaleRepliesIgnored(t *testing.T) {
 
 func TestRestoreCursor(t *testing.T) {
 	ch := func(g git.Group, p string) git.Change { return git.Change{Group: g, Path: p} }
-	l := fileList{height: 10}
+	var l fileList
+	l.setHeight(10)
 	l.setChanges([]git.Change{ch(git.Unstaged, "a"), ch(git.Unstaged, "b"), ch(git.Unstaged, "c")})
 	l.move(1) // on b
 
@@ -359,8 +363,8 @@ func TestDiscardAll(t *testing.T) {
 	m = pump(t, m, keyPress("r"))
 	m = pump(t, m, keyPress("D"))
 	m = pump(t, m, keyPress("esc"))
-	if m.confirm.active || len(m.files.changes) != 3 {
-		t.Fatalf("esc: active = %v, changes = %d; want closed and untouched", m.confirm.active, len(m.files.changes))
+	if m.confirm.active || len(m.files.items) != 3 {
+		t.Fatalf("esc: active = %v, changes = %d; want closed and untouched", m.confirm.active, len(m.files.items))
 	}
 	m = pump(t, m, keyPress("D"))
 	m = pump(t, m, keyPress("y"))
@@ -416,5 +420,129 @@ func TestCommitHintFits(t *testing.T) {
 	}
 	if v := plainView(m); !strings.Contains(v, "esc cancel") {
 		t.Errorf("commit hint cut off:\n%s", v)
+	}
+}
+
+func TestBranchView(t *testing.T) {
+	m, dir := newTestModel(t)
+	gitRun(t, dir, "branch", "feature")
+	if v := plainView(m); !strings.Contains(v, "1 Files") || !strings.Contains(v, "2 Branches") {
+		t.Fatalf("tabs missing from header:\n%s", v)
+	}
+
+	m = pump(t, m, keyPress("2"))
+	v := plainView(m)
+	for _, want := range []string{"Local  2", "* main", "feature", "init", "enter checkout"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("branch view missing %q:\n%s", want, v)
+		}
+	}
+	if b, _ := m.branches.selected(); !b.Current {
+		t.Errorf("cursor starts on %q, want the current branch", b.Name)
+	}
+
+	m = pump(t, m, keyPress("enter"))
+	if !strings.Contains(plainView(m), "Already on main") {
+		t.Errorf("checkout of the current branch:\n%s", plainView(m))
+	}
+
+	m = selectBranch(t, m, "feature")
+	m = pump(t, m, keyPress("enter"))
+	if m.branch.Head != "feature" || !strings.Contains(plainView(m), "Switched to feature") {
+		t.Fatalf("head = %q after checkout:\n%s", m.branch.Head, plainView(m))
+	}
+	if b, _ := m.branches.selected(); b.Name != "feature" || !b.Current {
+		t.Errorf("selection after checkout = %+v, want current feature", b)
+	}
+
+	// Back to files: the changes and their diff are still there.
+	m = pump(t, m, keyPress("1"))
+	if v := plainView(m); !strings.Contains(v, "a.txt") || !strings.Contains(v, "+two") {
+		t.Errorf("files view after switching back:\n%s", v)
+	}
+}
+
+func TestCheckoutRefusalShown(t *testing.T) {
+	m, dir := newTestModel(t)
+	gitRun(t, dir, "stash", "-q")
+	gitRun(t, dir, "switch", "-q", "-c", "other")
+	write(t, dir, "a.txt", "other\n")
+	gitRun(t, dir, "commit", "-q", "-am", "other")
+	gitRun(t, dir, "switch", "-q", "main")
+	gitRun(t, dir, "stash", "pop", "-q")
+
+	m = pump(t, m, keyPress("2"))
+	m = selectBranch(t, m, "other")
+	m = pump(t, m, keyPress("enter"))
+	if !m.isErr || !strings.Contains(m.message, "would be overwritten") || m.branch.Head != "main" {
+		t.Errorf("want git's refusal in the status line, head main:\n%s", plainView(m))
+	}
+}
+
+// selectBranch moves the branch cursor to name with k/j presses.
+func selectBranch(t *testing.T, m Model, name string) Model {
+	t.Helper()
+	for range m.branches.items {
+		m = pump(t, m, keyPress("k"))
+	}
+	for range m.branches.items {
+		if b, _ := m.branches.selected(); b.Name == name {
+			return m
+		}
+		m = pump(t, m, keyPress("j"))
+	}
+	t.Fatalf("branch %q not listed", name)
+	return m
+}
+
+func TestFooterKeepsHelpAndQuit(t *testing.T) {
+	m, _ := newTestModel(t)
+	for _, w := range []int{120, 90, 70, 50} {
+		m = pump(t, m, tea.WindowSizeMsg{Width: w, Height: 20})
+		lines := strings.Split(plainView(m), "\n")
+		footer := lines[len(lines)-1]
+		if !strings.HasSuffix(strings.TrimSpace(footer), "? help · q quit") {
+			t.Errorf("width %d: footer = %q, want it to end with help and quit", w, footer)
+		}
+		if !strings.Contains(footer, "space stage/unstage") {
+			t.Errorf("width %d: footer lost its first hint: %q", w, footer)
+		}
+	}
+}
+
+func TestStatusLetters(t *testing.T) {
+	m, dir := newTestModel(t)
+	write(t, dir, "new.txt", "x\n")
+	m = pump(t, m, keyPress("r"))
+	v := plainView(m)
+	for _, want := range []string{"M a.txt", "U new.txt"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("view missing %q:\n%s", want, v)
+		}
+	}
+	for code, want := range map[byte]byte{'?': 'U', 'U': '!', 'M': 'M', 'A': 'A', 'D': 'D'} {
+		if got := displayCode(code); got != want {
+			t.Errorf("displayCode(%c) = %c, want %c", code, got, want)
+		}
+	}
+}
+
+func TestAge(t *testing.T) {
+	tests := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Second, "now"},
+		{5 * time.Minute, "5m"},
+		{3 * time.Hour, "3h"},
+		{2 * 24 * time.Hour, "2d"},
+		{20 * 24 * time.Hour, "2w"},
+		{100 * 24 * time.Hour, "3mo"},
+		{800 * 24 * time.Hour, "2y"},
+	}
+	for _, tt := range tests {
+		if got := age(tt.d); got != tt.want {
+			t.Errorf("age(%v) = %q, want %q", tt.d, got, tt.want)
+		}
 	}
 }

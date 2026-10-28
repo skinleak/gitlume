@@ -14,33 +14,9 @@ import (
 // groupOrder is the order sections appear in the file list.
 var groupOrder = []git.Group{git.Staged, git.Unstaged, git.Untracked}
 
-type rowKind int
-
-const (
-	rowBlank rowKind = iota
-	rowHeader
-	rowChange
-)
-
-// row is one rendered line of the file list.
-type row struct {
-	kind  rowKind
-	group git.Group
-	count int // rowHeader: number of changes in the group
-	index int // rowChange: index into fileList.changes
-}
-
-// fileList is the grouped list of changed files. changes are kept in
-// groupOrder; cursor indexes changes, offset is the first visible row.
-// rows and rowOf are derived from changes once per update, so moving and
-// rendering never rebuild them.
+// fileList is the grouped list of changed files, kept in groupOrder.
 type fileList struct {
-	changes []git.Change
-	rows    []row
-	rowOf   []int // rowOf[i] is the row index of changes[i]
-	cursor  int
-	offset  int
-	height  int
+	sectionList[git.Change]
 }
 
 func allChanges(st git.Status) []git.Change {
@@ -51,16 +27,9 @@ func allChanges(st git.Status) []git.Change {
 	return out
 }
 
-func (l *fileList) selected() (git.Change, bool) {
-	if l.cursor < 0 || l.cursor >= len(l.changes) {
-		return git.Change{}, false
-	}
-	return l.changes[l.cursor], true
-}
-
 func (l *fileList) count(g git.Group) int {
 	n := 0
-	for _, c := range l.changes {
+	for _, c := range l.items {
 		if c.Group == g {
 			n++
 		}
@@ -70,28 +39,12 @@ func (l *fileList) count(g git.Group) int {
 
 // renameSource returns the source path of a staged rename to path, or "".
 func (l *fileList) renameSource(path string) string {
-	for _, c := range l.changes {
+	for _, c := range l.items {
 		if c.Path == path && c.OrigPath != "" {
 			return c.OrigPath
 		}
 	}
 	return ""
-}
-
-// move shifts the cursor by delta and reports whether it changed.
-func (l *fileList) move(delta int) bool {
-	next := clamp(l.cursor+delta, 0, len(l.changes)-1)
-	if next == l.cursor || len(l.changes) == 0 {
-		return false
-	}
-	l.cursor = next
-	l.ensureVisible()
-	return true
-}
-
-func (l *fileList) setHeight(h int) {
-	l.height = max(1, h)
-	l.ensureVisible()
 }
 
 // setChanges replaces the list, keeping the selection on the same file
@@ -100,10 +53,8 @@ func (l *fileList) setHeight(h int) {
 func (l *fileList) setChanges(cs []git.Change) {
 	prev, ok := l.selected()
 	pos := l.positionInGroup()
-	l.changes = cs
-	l.rows, l.rowOf = buildRows(cs)
-	l.cursor = l.restoreCursor(prev, ok, pos)
-	l.ensureVisible()
+	l.setItems(cs, func(a, b git.Change) bool { return a.Group == b.Group })
+	l.setCursor(l.restoreCursor(prev, ok, pos))
 }
 
 func (l *fileList) positionInGroup() int {
@@ -112,7 +63,7 @@ func (l *fileList) positionInGroup() int {
 		return 0
 	}
 	pos := 0
-	for _, o := range l.changes[:l.cursor] {
+	for _, o := range l.items[:l.cursor] {
 		if o.Group == c.Group {
 			pos++
 		}
@@ -125,7 +76,7 @@ func (l *fileList) restoreCursor(prev git.Change, hadPrev bool, pos int) int {
 		return 0
 	}
 	first, n := -1, 0
-	for i, c := range l.changes {
+	for i, c := range l.items {
 		if c.Group != prev.Group {
 			continue
 		}
@@ -140,74 +91,30 @@ func (l *fileList) restoreCursor(prev git.Change, hadPrev bool, pos int) int {
 	if n > 0 {
 		return first + min(pos, n-1)
 	}
-	return clamp(l.cursor, 0, len(l.changes)-1)
-}
-
-// buildRows lays out cs as section headers, separators and file rows.
-func buildRows(cs []git.Change) ([]row, []int) {
-	rows := make([]row, 0, len(cs)+3*len(groupOrder))
-	rowOf := make([]int, len(cs))
-	for i := 0; i < len(cs); {
-		g := cs[i].Group
-		j := i
-		for j < len(cs) && cs[j].Group == g {
-			j++
-		}
-		if len(rows) > 0 {
-			rows = append(rows, row{kind: rowBlank})
-		}
-		rows = append(rows, row{kind: rowHeader, group: g, count: j - i})
-		for k := i; k < j; k++ {
-			rowOf[k] = len(rows)
-			rows = append(rows, row{kind: rowChange, index: k})
-		}
-		i = j
-	}
-	return rows, rowOf
-}
-
-// ensureVisible scrolls so the cursor row, and its section header when it
-// is the first file of a group, are on screen.
-func (l *fileList) ensureVisible() {
-	rows := l.rows
-	if len(rows) == 0 {
-		l.offset = 0
-		return
-	}
-	cur := l.rowOf[l.cursor]
-	top := cur
-	if cur > 0 && rows[cur-1].kind == rowHeader {
-		top = cur - 1
-	}
-	if top < l.offset {
-		l.offset = top
-	}
-	if cur >= l.offset+l.height {
-		l.offset = cur - l.height + 1
-	}
-	l.offset = clamp(l.offset, 0, max(0, len(rows)-l.height))
+	return l.cursor
 }
 
 func (l *fileList) view(st theme.Styles, width int, focused bool) string {
-	if len(l.changes) == 0 {
+	if len(l.items) == 0 {
 		return st.Muted.Render("Working tree clean")
 	}
-	end := min(len(l.rows), l.offset+l.height)
-	lines := make([]string, 0, end-l.offset)
-	for _, r := range l.rows[l.offset:end] {
+	rows := l.visible()
+	lines := make([]string, 0, len(rows))
+	for _, r := range rows {
 		lines = append(lines, l.renderRow(st, r, width, focused))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func (l *fileList) renderRow(st theme.Styles, r row, width int, focused bool) string {
+func (l *fileList) renderRow(st theme.Styles, r listRow, width int, focused bool) string {
 	switch r.kind {
 	case rowHeader:
-		return st.Section.Render(r.group.String()) + "  " + st.Muted.Render(strconv.Itoa(r.count))
-	case rowChange:
-		c := l.changes[r.index]
+		g := l.items[r.index].Group
+		return st.Section.Render(g.String()) + "  " + st.Muted.Render(strconv.Itoa(r.count))
+	case rowItem:
+		c := l.items[r.index]
 		name := truncateLeft(displayPath(c), width-4)
-		code := string(c.Code)
+		code := string(displayCode(c.Code))
 		if r.index != l.cursor {
 			return "  " + codeStyle(st, c.Code).Render(code) + " " + st.Text.Render(name)
 		}
@@ -226,14 +133,31 @@ func displayPath(c git.Change) string {
 	return sanitize(c.Path)
 }
 
+// displayCode maps git's status letter to the one shown, following the
+// GitHub and VS Code convention: untracked files are U. git's own U
+// (unmerged) would then be ambiguous, so conflicts are shown as !.
+func displayCode(code byte) byte {
+	switch code {
+	case '?':
+		return 'U'
+	case 'U':
+		return '!'
+	}
+	return code
+}
+
+// codeStyle colors a status letter: new green, modified yellow, deleted
+// and conflicted red.
 func codeStyle(st theme.Styles, code byte) lipgloss.Style {
 	switch code {
 	case 'A', '?':
-		return st.DiffAdd
+		return st.StatusNew
+	case 'M', 'R', 'C', 'T':
+		return st.StatusModified
 	case 'D':
-		return st.DiffDel
+		return st.StatusDeleted
 	case 'U':
-		return st.Error
+		return st.StatusConflict
 	}
 	return st.Muted
 }

@@ -20,7 +20,8 @@ func manyChanges(n int) []git.Change {
 // BenchmarkFileListMoveAndView is one keypress in a 50k-file status.
 func BenchmarkFileListMoveAndView(b *testing.B) {
 	st := theme.Default()
-	l := fileList{height: 40}
+	var l fileList
+	l.setHeight(40)
 	l.setChanges(manyChanges(50_000))
 	b.ReportAllocs()
 	for b.Loop() {

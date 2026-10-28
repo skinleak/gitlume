@@ -2,7 +2,8 @@
 
 A calm, minimal terminal UI for git.
 
-gitlume shows what changed, lets you stage, discard and commit it. No
+gitlume shows what changed, lets you stage, discard and commit it, and
+switch branches. No
 boxes, no clutter: one accent color, generous spacing, and keybindings you
 can discover with `?`.
 
@@ -31,6 +32,8 @@ Run `gitlume` anywhere inside a git work tree.
 | `d`              | Discard all changes to the selected file (asks first) |
 | `D`              | Discard all uncommitted changes, including untracked files (asks first) |
 | `c`              | Commit (`enter` to confirm, `esc` to cancel) |
+| `1` / `2`        | Switch between files and branches     |
+| `enter` (branches) | Check out the selected branch (a remote branch gets a local tracking branch) |
 | `r`              | Refresh                               |
 | `?`              | Show all keybindings                  |
 | `q`              | Quit                                  |
@@ -63,6 +66,7 @@ go build ./...        # build
 go test ./...         # unit + integration tests (needs git)
 go vet ./...
 go run ./cmd/gitlume  # run against the current repository
+go run ./tools/preview  # regenerate docs/preview.svg after UI changes
 ```
 
 ```
@@ -71,9 +75,10 @@ internal/git/         git CLI wrapper and porcelain parsers (no UI)
 internal/ui/          Bubble Tea models: root app, file list, diff, commit prompt, help
 internal/ui/theme/    every color and style
 internal/ui/keys/     every keybinding (help is generated from these)
+tools/preview/        records the README clip from the real UI
 ```
 
 ## Roadmap
 
-The first milestone (status, diff, stage, commit) is done. Next up: log view
-and branches.
+Done: status, diff, stage, discard, commit, and the branch view. Next up:
+the log view.

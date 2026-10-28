@@ -6,6 +6,7 @@ package ui
 import (
 	"context"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -31,6 +32,16 @@ const (
 
 	// maxDiffCacheBytes bounds memory used by cached diffs between refreshes.
 	maxDiffCacheBytes = 32 << 20
+	// maxCommitCacheEntries bounds the per-branch commit cache.
+	maxCommitCacheEntries = 256
+)
+
+// viewKind is the screen selected with the number keys.
+type viewKind int
+
+const (
+	viewFiles viewKind = iota
+	viewBranches
 )
 
 type focusArea int
@@ -49,10 +60,12 @@ type Model struct {
 	styles      theme.Styles
 	help        help.Model
 
-	files   fileList
-	diff    diffView
-	commit  commitPrompt
-	confirm confirmPrompt
+	files    fileList
+	diff     diffView
+	branches branchList
+	commits  commitsView
+	commit   commitPrompt
+	confirm  confirmPrompt
 
 	branch    git.Branch
 	statusSeq int
@@ -60,6 +73,11 @@ type Model struct {
 	diffCache map[diffKey]diffContent
 	cacheSize int // bytes held in diffCache
 
+	branchSeq   int
+	commitSeq   int
+	commitCache map[string][]git.Commit // by full ref
+
+	view     viewKind
 	focus    focusArea
 	showHelp bool
 	zoomed   bool // the diff fills the body
@@ -82,6 +100,7 @@ func New(repo *git.Repo) Model {
 		help:        newHelp(st),
 		commit:      newCommitPrompt(st),
 		diffCache:   make(map[diffKey]diffContent),
+		commitCache: make(map[string][]git.Commit),
 	}
 }
 
@@ -106,6 +125,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.fetchDiff(msg.seq)
 	case diffLoadedMsg:
 		m.applyDiff(msg)
+		return m, nil
+	case branchesLoadedMsg:
+		return m, m.applyBranches(msg)
+	case commitsTickMsg:
+		return m, m.fetchCommits(msg.seq)
+	case commitsLoadedMsg:
+		m.applyCommits(msg)
 		return m, nil
 	case opDoneMsg:
 		m.busy = false
@@ -140,6 +166,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.zoomed {
 		return m, m.handleZoomedKey(msg)
 	}
+	if m.view == viewBranches {
+		return m, m.handleBranchKey(msg)
+	}
 
 	switch {
 	case key.Matches(msg, m.keys.Quit):
@@ -170,8 +199,77 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setZoom(true)
 	case key.Matches(msg, m.keys.Commit):
 		return m, m.openCommit()
+	case key.Matches(msg, m.keys.Branches):
+		return m, m.showView(viewBranches)
 	}
 	return m, nil
+}
+
+func (m *Model) handleBranchKey(msg tea.KeyMsg) tea.Cmd {
+	switch {
+	case key.Matches(msg, m.keys.Quit):
+		return tea.Quit
+	case key.Matches(msg, m.keys.Help):
+		m.showHelp = true
+	case key.Matches(msg, m.keys.Refresh):
+		return m.refresh()
+	case key.Matches(msg, m.keys.Files):
+		return m.showView(viewFiles)
+	case key.Matches(msg, m.keys.Down):
+		if m.branches.move(1) {
+			return m.requestCommits()
+		}
+	case key.Matches(msg, m.keys.Up):
+		if m.branches.move(-1) {
+			return m.requestCommits()
+		}
+	case key.Matches(msg, m.keys.ScrollDown):
+		m.commits.scroll(m.commits.height / 2)
+	case key.Matches(msg, m.keys.ScrollUp):
+		m.commits.scroll(-m.commits.height / 2)
+	case key.Matches(msg, m.keys.Checkout):
+		return m.checkoutSelected()
+	}
+	return nil
+}
+
+// showView switches screens. The branch list is loaded every time it is
+// shown, so it is never stale; the files view catches up on its diff.
+func (m *Model) showView(v viewKind) tea.Cmd {
+	if v == m.view {
+		return nil
+	}
+	m.view = v
+	if v == viewBranches {
+		return m.reloadBranches()
+	}
+	return m.requestDiff()
+}
+
+func (m *Model) checkoutSelected() tea.Cmd {
+	b, ok := m.branches.selected()
+	if !ok {
+		return nil
+	}
+	// A remote branch that already has a local counterpart switches to it.
+	if b.Remote {
+		if local, ok := m.branches.localFor(b); ok {
+			b = local
+		}
+	}
+	name := sanitize(b.Name)
+	if b.Current {
+		m.setMessage("Already on "+name, nil)
+		return nil
+	}
+	if b.Remote {
+		_, short, _ := strings.Cut(name, "/")
+		name = short
+	}
+	repo := m.repo
+	return m.startOp("Switching to "+name+"…", "Switched to "+name, func(ctx context.Context) error {
+		return repo.Checkout(ctx, b)
+	})
 }
 
 func (m *Model) handleCommitKey(msg tea.KeyMsg) tea.Cmd {
@@ -326,7 +424,7 @@ func (m *Model) askDiscard() {
 }
 
 func (m *Model) askDiscardAll() {
-	if len(m.files.changes) == 0 {
+	if len(m.files.items) == 0 {
 		m.setMessage("Nothing to discard", nil)
 		return
 	}
@@ -374,7 +472,68 @@ func (m *Model) applyStatus(msg statusLoadedMsg) tea.Cmd {
 	if _, ok := m.files.selected(); !ok && m.zoomed {
 		m.setZoom(false)
 	}
+	if m.view == viewBranches {
+		// The diff is loaded when the files view is shown again.
+		return m.reloadBranches()
+	}
 	return m.requestDiff()
+}
+
+func (m *Model) reloadBranches() tea.Cmd {
+	m.branchSeq++
+	return loadBranches(m.repo, m.branchSeq)
+}
+
+func (m *Model) applyBranches(msg branchesLoadedMsg) tea.Cmd {
+	if msg.seq != m.branchSeq {
+		return nil
+	}
+	if msg.err != nil {
+		m.setMessage("", msg.err)
+		return nil
+	}
+	m.branches.set(msg.branches, msg.now)
+	clear(m.commitCache)
+	return m.requestCommits()
+}
+
+// requestCommits shows the selected branch's commits, debounced and cached
+// like diffs.
+func (m *Model) requestCommits() tea.Cmd {
+	m.commitSeq++
+	b, ok := m.branches.selected()
+	if !ok {
+		m.commits.clear()
+		return nil
+	}
+	if cached, ok := m.commitCache[b.Ref()]; ok {
+		m.commits.show(b.Ref(), cached, m.branches.now)
+		return nil
+	}
+	return commitsTick(m.commitSeq)
+}
+
+func (m *Model) fetchCommits(seq int) tea.Cmd {
+	b, ok := m.branches.selected()
+	if seq != m.commitSeq || !ok {
+		return nil
+	}
+	return loadCommits(m.repo, seq, b.Ref())
+}
+
+func (m *Model) applyCommits(msg commitsLoadedMsg) {
+	if msg.seq != m.commitSeq {
+		return
+	}
+	if msg.err != nil {
+		m.setMessage("", msg.err)
+		return
+	}
+	if len(m.commitCache) >= maxCommitCacheEntries {
+		clear(m.commitCache)
+	}
+	m.commitCache[msg.ref] = msg.commits
+	m.commits.show(msg.ref, msg.commits, m.branches.now)
 }
 
 // requestDiff shows the selected change's diff, from cache when possible.
@@ -459,8 +618,10 @@ func (m Model) layout() layout {
 func (m *Model) resize() {
 	l := m.layout()
 	if !m.zoomed {
-		// The list keeps its scroll position while hidden.
+		// The lists keep their scroll position while hidden.
 		m.files.setHeight(l.listH)
+		m.branches.setHeight(l.listH)
+		m.commits.setHeight(l.diffH)
 	}
 	m.diff.setHeight(l.diffH)
 	m.help.Width = m.innerWidth()
@@ -503,9 +664,15 @@ func (m Model) bodyView(l layout) string {
 	if m.zoomed {
 		return m.diff.view(m.styles, l.diffW)
 	}
-	list := lipgloss.NewStyle().Width(l.listW).Render(
-		m.files.view(m.styles, l.listW, m.focus == focusFiles))
-	diff := m.diff.view(m.styles, l.diffW)
+	var list, diff string
+	if m.view == viewBranches {
+		list = m.branches.view(m.styles, l.listW)
+		diff = m.commits.view(m.styles, l.diffW)
+	} else {
+		list = m.files.view(m.styles, l.listW, m.focus == focusFiles)
+		diff = m.diff.view(m.styles, l.diffW)
+	}
+	list = lipgloss.NewStyle().Width(l.listW).Render(list)
 	if l.stacked {
 		list = lipgloss.NewStyle().Height(l.listH).Render(list)
 		return lipgloss.JoinVertical(lipgloss.Left, list, "", diff)
@@ -530,15 +697,33 @@ func (m Model) headerView() string {
 		parts = append(parts, st.Subtle.Render("no commits yet"))
 	}
 	if m.branch.Ahead > 0 {
-		parts = append(parts, st.Muted.Render("↑"+strconv.Itoa(m.branch.Ahead)))
+		parts = append(parts, st.Ahead.Render("↑"+strconv.Itoa(m.branch.Ahead)))
 	}
 	if m.branch.Behind > 0 {
-		parts = append(parts, st.Muted.Render("↓"+strconv.Itoa(m.branch.Behind)))
+		parts = append(parts, st.Behind.Render("↓"+strconv.Itoa(m.branch.Behind)))
 	}
 	if c, ok := m.files.selected(); ok && m.zoomed {
 		parts = append(parts, st.Text.Render(displayPath(c)))
 	}
-	return ansi.Truncate(strings.Join(parts, "  "), m.innerWidth(), "…")
+	left := strings.Join(parts, "  ")
+	// The tabs are right-aligned and dropped when they don't fit.
+	tabs := m.tabsView()
+	if gap := m.innerWidth() - ansi.StringWidth(left) - ansi.StringWidth(tabs); gap >= paneGap {
+		return left + strings.Repeat(" ", gap) + tabs
+	}
+	return ansi.Truncate(left, m.innerWidth(), "…")
+}
+
+func (m Model) tabsView() string {
+	st := m.styles
+	tab := func(b key.Binding, label string, v viewKind) string {
+		style := st.Tab
+		if m.view == v {
+			style = st.TabActive
+		}
+		return st.TabKey.Render(b.Help().Key) + " " + style.Render(label)
+	}
+	return tab(m.keys.Files, "Files", viewFiles) + "   " + tab(m.keys.Branches, "Branches", viewBranches)
 }
 
 func (m Model) footerView() string {
@@ -569,9 +754,27 @@ func (m Model) footerLine() string {
 		return m.messageView()
 	}
 	if m.zoomed {
-		return m.help.ShortHelpView(m.keys.DiffHelp())
+		return m.hints(m.keys.DiffHelp())
 	}
-	return m.help.ShortHelpView(m.keys.ShortHelp())
+	if m.view == viewBranches {
+		return m.hints(m.keys.BranchHelp())
+	}
+	return m.hints(m.keys.ShortHelp())
+}
+
+// hints renders footer key hints that fit the width. Hints are ordered by
+// importance, so the least important are dropped from the right; the last
+// two (help and quit or back) always stay.
+func (m Model) hints(bs []key.Binding) string {
+	h := m.help
+	h.Width = 0 // measure untruncated
+	for len(bs) > 2 {
+		if v := h.ShortHelpView(bs); ansi.StringWidth(v) <= m.innerWidth() {
+			return v
+		}
+		bs = slices.Delete(slices.Clone(bs), len(bs)-3, len(bs)-2)
+	}
+	return h.ShortHelpView(bs)
 }
 
 func (m Model) messageView() string {
