@@ -33,6 +33,7 @@ Run `gitlume` anywhere inside a git work tree.
 | `D`              | Discard all uncommitted changes, including untracked files (asks first) |
 | `c`              | Commit (`enter` to confirm, `esc` to cancel) |
 | `1` / `2` / `3` / `4` | Switch between files, branches, the log and a full-page graph of all branches |
+| `←` / `→`        | Previous / next tab (wraps around)    |
 | `enter` (branches) | Check out the selected branch (a remote branch gets a local tracking branch) |
 | `r`              | Refresh                               |
 | `?`              | Show all keybindings                  |

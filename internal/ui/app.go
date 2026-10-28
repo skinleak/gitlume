@@ -49,6 +49,7 @@ const (
 	viewBranches
 	viewLog
 	viewGraph
+	viewCount // the number of views; ← and → wrap around
 )
 
 type focusArea int
@@ -188,6 +189,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.showView(viewLog)
 	case key.Matches(msg, m.keys.Graph):
 		return m, m.showView(viewGraph)
+	case key.Matches(msg, m.keys.NextView):
+		return m, m.showView((m.view + 1) % viewCount)
+	case key.Matches(msg, m.keys.PrevView):
+		return m, m.showView((m.view + viewCount - 1) % viewCount)
 	}
 	switch m.view {
 	case viewBranches:

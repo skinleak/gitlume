@@ -614,6 +614,37 @@ func TestLogOnUnbornBranch(t *testing.T) {
 	}
 }
 
+func TestArrowsSwitchTabs(t *testing.T) {
+	m, _ := newTestModel(t)
+	right, left := tea.KeyMsg{Type: tea.KeyRight}, tea.KeyMsg{Type: tea.KeyLeft}
+	for _, want := range []viewKind{viewBranches, viewLog, viewGraph, viewFiles} {
+		if m = pump(t, m, right); m.view != want {
+			t.Fatalf("→: view %d, want %d", m.view, want)
+		}
+	}
+	if m = pump(t, m, left); m.view != viewGraph {
+		t.Errorf("← from files should wrap to the graph, got view %d", m.view)
+	}
+	if v := plainView(m); !strings.Contains(v, "All branches") {
+		t.Errorf("← did not load the graph:\n%s", v)
+	}
+
+	// While typing a commit message the arrows move the text cursor.
+	m = pump(t, m, keyPress("1"))
+	m = pump(t, m, keyPress("a"))
+	m = pump(t, m, keyPress("c"))
+	if m = pump(t, m, right); m.view != viewFiles || !m.commit.active {
+		t.Errorf("→ in the commit prompt switched tabs")
+	}
+	m = pump(t, m, keyPress("esc"))
+
+	// A fullscreen diff stays put.
+	m = pump(t, m, keyPress("enter"))
+	if m = pump(t, m, right); m.view != viewFiles || !m.zoomed {
+		t.Errorf("→ in a fullscreen diff switched tabs")
+	}
+}
+
 func TestGraphView(t *testing.T) {
 	m, dir := newTestModel(t)
 	gitRun(t, dir, "stash", "-q")
