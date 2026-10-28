@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -83,6 +84,67 @@ func TestParseLog(t *testing.T) {
 	}
 	if _, err := ParseLog([]byte("abc\n")); err == nil {
 		t.Error("expected an error for a malformed record")
+	}
+}
+
+func TestParseGraph(t *testing.T) {
+	// Captured from `git log --decorate=full --format=<graphFormat>`: a
+	// merge, a commit without refs, and a root with a tag and remotes.
+	in := "85572da42cd91e6e93a5529b1d78fe36f985fb7b\x0085572da\x00dbf560a9535113a6b6cad3e54c4bbac7abe677f1 451072875559ee4f6a16897ccd821b28d25016c8\x001793180269\x00HEAD -> refs/heads/main\x00Merge branch 'feat'\n" +
+		"dbf560a9535113a6b6cad3e54c4bbac7abe677f1\x00dbf560a\x009bfad4d905d836f93a274fec5483a6a91805db2c\x001793180269\x00\x00three\n" +
+		"9bfad4d905d836f93a274fec5483a6a91805db2c\x009bfad4d\x00\x001793180269\x00tag: refs/tags/v1, refs/remotes/origin/main, refs/remotes/origin/HEAD\x00one\n"
+	got, err := ParseGraph([]byte(in))
+	if err != nil {
+		t.Fatalf("ParseGraph: %v", err)
+	}
+	at := time.Unix(1793180269, 0)
+	want := []Commit{
+		{
+			ID: "85572da42cd91e6e93a5529b1d78fe36f985fb7b", Hash: "85572da", Date: at, Subject: "Merge branch 'feat'",
+			Parents: []string{"dbf560a9535113a6b6cad3e54c4bbac7abe677f1", "451072875559ee4f6a16897ccd821b28d25016c8"},
+			Refs:    []string{"HEAD -> refs/heads/main"},
+		},
+		{
+			ID: "dbf560a9535113a6b6cad3e54c4bbac7abe677f1", Hash: "dbf560a", Date: at, Subject: "three",
+			Parents: []string{"9bfad4d905d836f93a274fec5483a6a91805db2c"},
+		},
+		{
+			ID: "9bfad4d905d836f93a274fec5483a6a91805db2c", Hash: "9bfad4d", Date: at, Subject: "one",
+			Parents: []string{}, Refs: []string{"tag: refs/tags/v1", "refs/remotes/origin/main", "refs/remotes/origin/HEAD"},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("ParseGraph\n got: %+v\nwant: %+v", got, want)
+	}
+	if _, err := ParseGraph([]byte("abc\x00def\n")); err == nil {
+		t.Error("expected an error for a malformed record")
+	}
+}
+
+func TestGraph(t *testing.T) {
+	r := newTestRepo(t)
+	dir := r.Root()
+	gitCmd(t, dir, "switch", "-q", "-c", "feat")
+	gitCmd(t, dir, "commit", "-q", "--allow-empty", "-m", "feat work")
+	gitCmd(t, dir, "switch", "-q", "main")
+	gitCmd(t, dir, "commit", "-q", "--allow-empty", "-m", "main work")
+	gitCmd(t, dir, "merge", "-q", "--no-ff", "--no-edit", "feat")
+
+	cs, err := r.Graph(context.Background(), 10, true)
+	if err != nil {
+		t.Fatalf("Graph: %v", err)
+	}
+	if len(cs) != 4 || len(cs[0].Parents) != 2 || cs[len(cs)-1].Subject != "init" {
+		t.Fatalf("Graph = %+v", cs)
+	}
+	if !slices.Equal(cs[0].Refs, []string{"HEAD -> refs/heads/main"}) {
+		t.Errorf("merge refs = %q", cs[0].Refs)
+	}
+
+	// An orphan branch has no HEAD commit, but the other branches still show.
+	gitCmd(t, dir, "checkout", "-q", "--orphan", "fresh")
+	if cs, err := r.Graph(context.Background(), 10, false); err != nil || len(cs) != 4 {
+		t.Errorf("Graph on an unborn branch = %d commits, %v", len(cs), err)
 	}
 }
 

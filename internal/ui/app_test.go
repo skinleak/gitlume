@@ -126,7 +126,7 @@ func TestViewFitsWindow(t *testing.T) {
 	m, _ := newTestModel(t)
 	for _, size := range [][2]int{{100, 30}, {60, 20}, {200, 50}, {30, 8}, {20, 4}, {10, 2}} {
 		m = pump(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm", "branches", "log", "log zoom"} {
+		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm", "branches", "log", "log zoom", "graph"} {
 			mm := m
 			switch mode {
 			case "help":
@@ -148,6 +148,8 @@ func TestViewFitsWindow(t *testing.T) {
 			case "log zoom":
 				mm = pump(t, mm, keyPress("3"))
 				mm = pump(t, mm, keyPress("enter"))
+			case "graph":
+				mm = pump(t, mm, keyPress("4"))
 			}
 			lines := strings.Split(plainView(mm), "\n")
 			if len(lines) != size[1] {
@@ -591,7 +593,7 @@ func TestLogLoadsMoreWhenNearTheEnd(t *testing.T) {
 	m, dir := newTestModel(t)
 	gitRun(t, dir, "commit", "-q", "-am", "second")
 	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "third")
-	m.logLimit = 1
+	m.log.limit = 1
 	m = pump(t, m, keyPress("3"))
 	if len(m.log.items) != 1 || !strings.Contains(plainView(m), "Commits  1+") {
 		t.Fatalf("first page: %d commits:\n%s", len(m.log.items), plainView(m))
@@ -609,6 +611,46 @@ func TestLogOnUnbornBranch(t *testing.T) {
 	m = pump(t, m, keyPress("3"))
 	if v := plainView(m); !strings.Contains(v, "No commits yet") || m.isErr {
 		t.Errorf("unborn log:\n%s", v)
+	}
+}
+
+func TestGraphView(t *testing.T) {
+	m, dir := newTestModel(t)
+	gitRun(t, dir, "stash", "-q")
+	gitRun(t, dir, "switch", "-q", "-c", "feat")
+	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "feat work")
+	gitRun(t, dir, "switch", "-q", "main")
+	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "main work")
+	gitRun(t, dir, "merge", "-q", "--no-ff", "--no-edit", "feat")
+	m = pump(t, m, keyPress("r"))
+	m = pump(t, m, keyPress("4"))
+	v := plainView(m)
+	for _, want := range []string{
+		"4 Graph", "All branches  4",
+		"› ●─╮  main Merge branch 'feat'",
+		"│ ●  feat feat work", "●─╯  init",
+	} {
+		if !strings.Contains(v, want) {
+			t.Errorf("graph view missing %q:\n%s", want, v)
+		}
+	}
+	// The graph is the whole page: no commit details, no diffstat.
+	m = pump(t, m, keyPress("enter"))
+	for _, unwanted := range []string{"Author:", "Merge:", "changed", "diff --git"} {
+		if strings.Contains(plainView(m), unwanted) || m.zoomed {
+			t.Errorf("graph view shows %q:\n%s", unwanted, plainView(m))
+		}
+	}
+	m = pump(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	if c, _ := m.graph.selected(); c.Subject != "init" {
+		t.Errorf("ctrl+d should page the cursor down, got %q", c.Subject)
+	}
+
+	// On an unborn branch the other branches still show.
+	gitRun(t, dir, "checkout", "-q", "--orphan", "fresh")
+	m = pump(t, m, keyPress("r"))
+	if v := plainView(m); !strings.Contains(v, "All branches  4") || m.isErr {
+		t.Errorf("graph on an unborn branch:\n%s", v)
 	}
 }
 

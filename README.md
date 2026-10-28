@@ -3,11 +3,11 @@
 A calm, minimal terminal UI for git.
 
 gitlume shows what changed, lets you stage, discard and commit it, browse
-the history, and switch branches. No
+the history with a graph of every branch, and switch branches. No
 boxes, no clutter: one accent color, generous spacing, and keybindings you
 can discover with `?`.
 
-![gitlume: browsing changes, viewing a diff fullscreen, staging, discarding and committing](docs/preview.svg)
+![gitlume: browsing changes, viewing a diff, staging, committing, the log, the graph and switching branches](docs/preview.svg)
 
 ## Install
 
@@ -32,7 +32,7 @@ Run `gitlume` anywhere inside a git work tree.
 | `d`              | Discard all changes to the selected file (asks first) |
 | `D`              | Discard all uncommitted changes, including untracked files (asks first) |
 | `c`              | Commit (`enter` to confirm, `esc` to cancel) |
-| `1` / `2` / `3`  | Switch between files, branches and the log |
+| `1` / `2` / `3` / `4` | Switch between files, branches, the log and a full-page graph of all branches |
 | `enter` (branches) | Check out the selected branch (a remote branch gets a local tracking branch) |
 | `r`              | Refresh                               |
 | `?`              | Show all keybindings                  |
@@ -80,4 +80,5 @@ tools/preview/        records the README clip from the real UI
 
 ## Roadmap
 
-Done: status, diff, stage, discard, commit, the branch view and the log.
+Done: status, diff, stage, discard, commit, the branch view, the log and
+the graph.

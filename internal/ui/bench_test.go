@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/skinleak/gitlume/internal/git"
 	"github.com/skinleak/gitlume/internal/ui/theme"
@@ -53,5 +54,47 @@ func BenchmarkSplitDiff(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = splitDiff(text)
+	}
+}
+
+// wideHistory is n commits on 40 branches that run side by side down to a
+// shared root, so every row has 40 lanes.
+func wideHistory(n int) []git.Commit {
+	const branches = 40
+	cs := make([]git.Commit, 0, n+1)
+	for i := range n {
+		c := git.Commit{ID: fmt.Sprint(i), Hash: fmt.Sprint(i), Subject: "a commit subject of ordinary length"}
+		if i+branches < n {
+			c.Parents = []string{fmt.Sprint(i + branches)}
+		} else {
+			c.Parents = []string{"root"}
+		}
+		cs = append(cs, c)
+	}
+	return append(cs, git.Commit{ID: "root", Hash: "root"})
+}
+
+// BenchmarkLayoutGraph lays out ten pages of a 40-lane history.
+func BenchmarkLayoutGraph(b *testing.B) {
+	cs := wideHistory(10 * logPage)
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = layoutGraph(cs)
+	}
+}
+
+// BenchmarkGraphMoveAndView is one keypress in that graph.
+func BenchmarkGraphMoveAndView(b *testing.B) {
+	st := theme.Default()
+	cs := wideHistory(10 * logPage)
+	l := logList{graph: true}
+	l.setHeight(50)
+	l.set(cs, layoutGraph(cs), false, time.Now())
+	b.ReportAllocs()
+	for b.Loop() {
+		if !l.move(1) {
+			l.cursor = 0
+		}
+		_ = l.view(st, 100, true)
 	}
 }
