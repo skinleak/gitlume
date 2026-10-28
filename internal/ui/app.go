@@ -468,10 +468,11 @@ func (m *Model) resize() {
 }
 
 // commitInputWidth leaves room on the footer line for the prompt label
-// and its key hints.
+// and its key hints. textinput renders one cell more than its Width for
+// the cursor, hence the extra 1.
 func (m Model) commitInputWidth() int {
 	hint := ansi.StringWidth(m.help.ShortHelpView(m.promptKeys.ShortHelp()))
-	return max(1, m.innerWidth()-ansi.StringWidth(commitLabel)-hint-paneGap)
+	return max(1, m.innerWidth()-ansi.StringWidth(commitLabel)-hint-paneGap-1)
 }
 
 // View renders the whole screen.

@@ -406,3 +406,15 @@ func TestConfirmHintVisibleWhenNarrow(t *testing.T) {
 		t.Errorf("y/n hint cut off:\n%s", v)
 	}
 }
+
+func TestCommitHintFits(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = pump(t, m, keyPress("a"))
+	m = pump(t, m, keyPress("c"))
+	for _, r := range "a message long enough to reach the hint at the end of the line" {
+		m = pump(t, m, keyPress(string(r)))
+	}
+	if v := plainView(m); !strings.Contains(v, "esc cancel") {
+		t.Errorf("commit hint cut off:\n%s", v)
+	}
+}

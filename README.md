@@ -6,21 +6,7 @@ gitlume shows what changed, lets you stage, discard and commit it. No
 boxes, no clutter: one accent color, generous spacing, and keybindings you
 can discover with `?`.
 
-```
-  gitlume  main  ↑1
-
-  Staged  1                          diff --git a/app.go b/app.go
-  › M app.go                         @@ -12,6 +12,7 @@ func main() {
-                                          cfg := load()
-  Unstaged  2                        +    cfg.Validate()
-    M README.md                           run(cfg)
-    D old.txt
-
-  Untracked  1
-    ? notes.md
-
-  space stage / unstage · a stage all · d discard file · D discard all · c commit · …
-```
+![gitlume: browsing changes, viewing a diff fullscreen, staging, discarding and committing](docs/preview.svg)
 
 ## Install
 
