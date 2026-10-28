@@ -17,6 +17,8 @@ type Palette struct {
 	Error   lipgloss.TerminalColor
 	Warning lipgloss.TerminalColor
 	Remote  lipgloss.TerminalColor
+	// Lanes colors the branch lines of the commit graph, GitHub style.
+	Lanes []lipgloss.TerminalColor
 }
 
 // The bright ANSI colors (SGR 90–97).
@@ -27,6 +29,7 @@ const (
 	brightYellow = lipgloss.Color("11")
 	brightBlue   = lipgloss.Color("12")
 	brightPurple = lipgloss.Color("13")
+	brightCyan   = lipgloss.Color("14")
 	brightWhite  = lipgloss.Color("15")
 	regularBlack = lipgloss.Color("0")
 )
@@ -45,6 +48,7 @@ func DefaultPalette() Palette {
 		Error:   brightRed,
 		Warning: brightYellow,
 		Remote:  brightPurple,
+		Lanes:   []lipgloss.TerminalColor{brightBlue, brightGreen, brightYellow, brightPurple, brightCyan, brightRed},
 	}
 }
 
@@ -84,6 +88,9 @@ type Styles struct {
 	Behind        lipgloss.Style
 	Gone          lipgloss.Style
 	CommitHash    lipgloss.Style
+
+	// Lanes has one style per graph lane color; lane n uses Lanes[n%len].
+	Lanes []lipgloss.Style
 
 	Tab       lipgloss.Style
 	TabActive lipgloss.Style
@@ -127,6 +134,7 @@ func New(p Palette) Styles {
 		Behind:        s().Foreground(p.Removed),
 		Gone:          s().Foreground(p.Warning),
 		CommitHash:    s().Foreground(p.Warning),
+		Lanes:         laneStyles(p.Lanes),
 
 		Tab:       s().Foreground(p.Muted),
 		TabActive: s().Foreground(p.Text).Bold(true),
@@ -135,6 +143,14 @@ func New(p Palette) Styles {
 		HelpDsc:   s().Foreground(p.Muted),
 		HelpSep:   s().Foreground(p.Subtle).Faint(true),
 	}
+}
+
+func laneStyles(colors []lipgloss.TerminalColor) []lipgloss.Style {
+	out := make([]lipgloss.Style, len(colors))
+	for i, c := range colors {
+		out[i] = lipgloss.NewStyle().Foreground(c)
+	}
+	return out
 }
 
 // Default returns the styles for the default palette.

@@ -54,10 +54,13 @@ type commitsLoadedMsg struct {
 	err     error
 }
 
-// logLoadedMsg carries the first limit commits of HEAD.
+// logLoadedMsg carries the first limit commits of HEAD, or of all branches
+// with their graph lanes.
 type logLoadedMsg struct {
 	seq     int
+	graph   bool
 	commits []git.Commit
+	lanes   [][]graphCell
 	limit   int
 	now     time.Time
 	err     error
@@ -121,6 +124,19 @@ func loadLog(repo *git.Repo, seq, limit int) tea.Cmd {
 	return func() tea.Msg {
 		cs, err := repo.Log(context.Background(), "HEAD", limit)
 		return logLoadedMsg{seq: seq, commits: cs, limit: limit, now: time.Now(), err: err}
+	}
+}
+
+// loadGraph loads all branches' history and lays out its lanes. head adds
+// HEAD, which an unborn branch doesn't have.
+func loadGraph(repo *git.Repo, seq, limit int, head bool) tea.Cmd {
+	return func() tea.Msg {
+		cs, err := repo.Graph(context.Background(), limit, head)
+		msg := logLoadedMsg{seq: seq, graph: true, commits: cs, limit: limit, now: time.Now(), err: err}
+		if err == nil {
+			msg.lanes = layoutGraph(cs)
+		}
+		return msg
 	}
 }
 

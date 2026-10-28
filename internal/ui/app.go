@@ -48,6 +48,7 @@ const (
 	viewFiles viewKind = iota
 	viewBranches
 	viewLog
+	viewGraph
 )
 
 type focusArea int
@@ -71,6 +72,7 @@ type Model struct {
 	branches branchList
 	commits  commitsView
 	log      logList
+	graph    logList
 	commit   commitPrompt
 	confirm  confirmPrompt
 
@@ -83,9 +85,6 @@ type Model struct {
 	branchSeq   int
 	commitSeq   int
 	commitCache map[string][]git.Commit // by full ref
-
-	logSeq   int
-	logLimit int // commits requested from git; grows by logPage
 
 	view     viewKind
 	focus    focusArea
@@ -111,7 +110,8 @@ func New(repo *git.Repo) Model {
 		commit:      newCommitPrompt(st),
 		diffCache:   make(map[diffKey]diffContent),
 		commitCache: make(map[string][]git.Commit),
-		logLimit:    logPage,
+		log:         logList{limit: logPage},
+		graph:       logList{graph: true, limit: logPage},
 	}
 }
 
@@ -186,12 +186,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.showView(viewBranches)
 	case key.Matches(msg, m.keys.Log):
 		return m, m.showView(viewLog)
+	case key.Matches(msg, m.keys.Graph):
+		return m, m.showView(viewGraph)
 	}
 	switch m.view {
 	case viewBranches:
 		return m, m.handleBranchKey(msg)
 	case viewLog:
 		return m, m.handleLogKey(msg)
+	case viewGraph:
+		return m, m.handleGraphKey(msg)
 	}
 
 	switch {
@@ -253,6 +257,28 @@ func (m *Model) handleLogKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+// handleGraphKey handles keys in the graph view, which is only the graph:
+// there is no details pane, so the page keys move the cursor.
+func (m *Model) handleGraphKey(msg tea.KeyMsg) tea.Cmd {
+	switch {
+	case key.Matches(msg, m.keys.Quit):
+		return tea.Quit
+	case key.Matches(msg, m.keys.Help):
+		m.showHelp = true
+	case key.Matches(msg, m.keys.Refresh):
+		return m.refresh()
+	case key.Matches(msg, m.keys.Down):
+		return m.moveOrScroll(1)
+	case key.Matches(msg, m.keys.Up):
+		return m.moveOrScroll(-1)
+	case key.Matches(msg, m.keys.ScrollDown):
+		return m.moveOrScroll(max(1, m.graph.height/2))
+	case key.Matches(msg, m.keys.ScrollUp):
+		return m.moveOrScroll(-max(1, m.graph.height/2))
+	}
+	return nil
+}
+
 func (m *Model) handleBranchKey(msg tea.KeyMsg) tea.Cmd {
 	switch {
 	case key.Matches(msg, m.keys.Quit):
@@ -279,7 +305,7 @@ func (m *Model) handleBranchKey(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
-// showView switches screens. The branch list and the log are loaded every
+// showView switches screens. The branch list and the histories are loaded every
 // time they are shown, so they are never stale; the files view catches up
 // on its diff.
 func (m *Model) showView(v viewKind) tea.Cmd {
@@ -291,7 +317,7 @@ func (m *Model) showView(v viewKind) tea.Cmd {
 	switch v {
 	case viewBranches:
 		return m.reloadBranches()
-	case viewLog:
+	case viewLog, viewGraph:
 		return m.reloadLog()
 	}
 	return m.requestDiff()
@@ -415,12 +441,12 @@ func (m *Model) moveOrScroll(delta int) tea.Cmd {
 		m.diff.scroll(delta)
 		return nil
 	}
-	if m.view == viewLog {
-		moved := m.log.move(delta)
+	if h := m.history(); h != nil {
+		moved := h.move(delta)
 		var more tea.Cmd
-		if m.log.more && m.log.cursor >= len(m.log.items)-logPrefetch {
-			m.log.more = false // one page request at a time
-			m.logLimit += logPage
+		if h.more && h.cursor >= len(h.items)-logPrefetch {
+			h.more = false // one page request at a time
+			h.limit += logPage
 			more = m.reloadLog()
 		}
 		if !moved {
@@ -541,32 +567,56 @@ func (m *Model) applyStatus(msg statusLoadedMsg) tea.Cmd {
 	case viewBranches:
 		// The diff is loaded when the files view is shown again.
 		return m.reloadBranches()
-	case viewLog:
+	case viewLog, viewGraph:
 		return m.reloadLog()
 	}
 	return m.requestDiff()
 }
 
-// reloadLog loads the first logLimit commits of HEAD. A branch without
-// commits has no log, and git would fail on it.
+// history is the commit list of the log or graph view, or nil in other
+// views.
+func (m *Model) history() *logList {
+	switch m.view {
+	case viewLog:
+		return &m.log
+	case viewGraph:
+		return &m.graph
+	}
+	return nil
+}
+
+// reloadLog loads the first limit commits of the current history. A
+// branch without commits has no log, and git would fail on it; the graph
+// still shows the other branches.
 func (m *Model) reloadLog() tea.Cmd {
-	m.logSeq++
+	h := m.history()
+	h.seq++
+	if h.graph {
+		return loadGraph(m.repo, h.seq, h.limit, !m.branch.Unborn())
+	}
 	if m.branch.Unborn() {
-		m.log.set(nil, false, m.log.now)
+		h.set(nil, nil, false, h.now)
 		return m.requestDiff()
 	}
-	return loadLog(m.repo, m.logSeq, m.logLimit)
+	return loadLog(m.repo, h.seq, h.limit)
 }
 
 func (m *Model) applyLog(msg logLoadedMsg) tea.Cmd {
-	if msg.seq != m.logSeq {
+	h := &m.log
+	if msg.graph {
+		h = &m.graph
+	}
+	if msg.seq != h.seq {
 		return nil
 	}
 	if msg.err != nil {
 		m.setMessage("", msg.err)
 		return nil
 	}
-	m.log.set(msg.commits, len(msg.commits) == msg.limit, msg.now)
+	h.set(msg.commits, msg.lanes, len(msg.commits) == msg.limit, msg.now)
+	if msg.graph || m.view != viewLog {
+		return nil // only the log has a details pane
+	}
 	return m.requestDiff()
 }
 
@@ -645,7 +695,7 @@ func (m *Model) requestDiff() tea.Cmd {
 }
 
 // diffTarget is what the diff pane shows in the current view: the selected
-// change, or the selected commit of the log.
+// change, or the selected commit of the log. The graph has no pane.
 func (m Model) diffTarget() (diffKey, bool) {
 	switch m.view {
 	case viewFiles:
@@ -720,6 +770,9 @@ func (m Model) layout() layout {
 		listH := max(1, bodyH*2/5)
 		return layout{listW: w, listH: listH, diffW: w, diffH: max(1, bodyH-listH-1), stacked: true}
 	}
+	if m.view == viewGraph {
+		return layout{listW: w, listH: bodyH} // the graph is the whole page
+	}
 	listW := clamp(w*35/100, minListWidth, maxListWidth)
 	return layout{listW: listW, listH: bodyH, diffW: w - listW - paneGap, diffH: bodyH}
 }
@@ -731,6 +784,7 @@ func (m *Model) resize() {
 		m.files.setHeight(l.listH)
 		m.branches.setHeight(l.listH)
 		m.log.setHeight(l.listH)
+		m.graph.setHeight(l.listH)
 		m.commits.setHeight(l.diffH)
 	}
 	m.diff.setHeight(l.diffH)
@@ -782,6 +836,8 @@ func (m Model) bodyView(l layout) string {
 	case viewLog:
 		list = m.log.view(m.styles, l.listW, m.focus == focusFiles)
 		diff = m.diff.view(m.styles, l.diffW)
+	case viewGraph:
+		return m.graph.view(m.styles, l.listW, true)
 	default:
 		list = m.files.view(m.styles, l.listW, m.focus == focusFiles)
 		diff = m.diff.view(m.styles, l.diffW)
@@ -820,8 +876,11 @@ func (m Model) headerView() string {
 		if c, ok := m.files.selected(); ok && m.view == viewFiles {
 			parts = append(parts, st.Text.Render(displayPath(c)))
 		}
-		if c, ok := m.log.selected(); ok && m.view == viewLog {
-			parts = append(parts, st.CommitHash.Render(sanitize(c.Hash))+" "+st.Text.Render(sanitize(c.Subject)))
+		if h := m.history(); h != nil {
+			c, ok := h.selected()
+			if ok {
+				parts = append(parts, st.CommitHash.Render(sanitize(c.Hash))+" "+st.Text.Render(sanitize(c.Subject)))
+			}
 		}
 	}
 	left := strings.Join(parts, "  ")
@@ -843,7 +902,7 @@ func (m Model) tabsView() string {
 		return st.TabKey.Render(b.Help().Key) + " " + style.Render(label)
 	}
 	return tab(m.keys.Files, "Files", viewFiles) + "   " + tab(m.keys.Branches, "Branches", viewBranches) +
-		"   " + tab(m.keys.Log, "Log", viewLog)
+		"   " + tab(m.keys.Log, "Log", viewLog) + "   " + tab(m.keys.Graph, "Graph", viewGraph)
 }
 
 func (m Model) footerView() string {
@@ -881,6 +940,8 @@ func (m Model) footerLine() string {
 		return m.hints(m.keys.BranchHelp())
 	case viewLog:
 		return m.hints(m.keys.LogHelp())
+	case viewGraph:
+		return m.hints(m.keys.GraphHelp())
 	}
 	return m.hints(m.keys.ShortHelp())
 }

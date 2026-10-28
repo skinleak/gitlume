@@ -36,7 +36,7 @@ internal/git/            UI-free git wrapper; everything here is unit-testable
   status.go              porcelain v2 -z parser; Status.Changes(group)
   diff.go                per-change diff, capped at MaxDiffBytes
   ops.go                 Stage, Unstage, StageAll, Commit, Discard, DiscardAll
-  branches.go            for-each-ref and log parsers; Branches, Log, Show, Checkout
+  branches.go            for-each-ref and log parsers; Branches, Log, Graph, Show, Checkout
 internal/ui/
   app.go                 root Model: key routing, layout, header/footer, async orchestration
   msgs.go                tea.Msg types + tea.Cmd constructors wrapping internal/git
@@ -44,7 +44,8 @@ internal/ui/
   status.go              fileList: change rows and selection restore
   diff.go                diffView: renders only visible lines, truncates (never wraps)
   branches.go            branchList + commitsView for the branch view (`2`)
-  log.go                 logList and commit-header styling for the log view (`3`)
+  log.go                 logList (log `3` and graph `4`) and commit-header styling
+  graph.go               lane layout and rendering for the graph view
   commit.go              commit prompt (textinput)
   confirm.go             y/n question guarding destructive operations
   help.go                help overlay generated from keys.KeyMap
@@ -73,6 +74,13 @@ tools/preview/           drives the real Model through a script, writes docs/pre
    selected commit is shown in the diff pane through the same
    `requestDiff`/`diffCache` path as file diffs, keyed by
    `diffKey{commit: hash}`; `diffTarget()` decides what the pane shows.
+   The graph view (`4`) is a second `logList` (`graph: true`) over all
+   local and remote branches plus HEAD, and it is the whole page: no
+   details pane, no diffstat, so `diffTarget()` has nothing for it and the
+   page keys move the cursor. `loadGraph` lays out its lanes
+   (`layoutGraph`) in the background along with the load; `View` only
+   styles the cells of visible rows. `Model.history()` is the list of
+   whichever of the two views is shown; each keeps its own `seq` and `limit`.
 6. Mutations go through `startOp`. Only one runs at a time (`busy`), so
    commands never fight over `index.lock`. `opDoneMsg` always triggers a
    refresh, even after an error.
@@ -98,7 +106,9 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   instead of separators. Colors are bright ANSI indices (SGR 90–97) so the
   terminal theme decides the exact shades. Blue is the UI accent; the other
   colors carry git meaning only (added/current/ahead green, removed/behind
-  red, modified/hashes/warnings yellow, remotes purple).
+  red, modified/hashes/warnings yellow, remotes purple). The one exception
+  is the graph's lanes, which cycle through `Palette.Lanes` so branches can
+  be told apart.
 - **Status letters follow GitHub/VS Code, not raw git:** untracked shows `U`
   and conflicts `!` (`displayCode`). `git.Change.Code` keeps git's letters;
   only the UI maps them.
@@ -166,14 +176,23 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   assertion is trivially true. Call `withColors(t)` in tests that compare
   styles, and check a test fails without its fix.
 - **`git log HEAD` fails on an unborn branch**, so `reloadLog` skips git
-  there and shows "No commits yet".
+  there and shows "No commits yet". The graph leaves HEAD out instead and
+  still shows the other branches.
+- **The graph needs full hashes and child-before-parent order.** Lanes are
+  linked by `%H`/`%P` (abbreviations can differ in length), and
+  `--date-order` guarantees children come first. A commit's parents that
+  lie beyond the loaded page just leave lanes running off the bottom.
+- **`%D` lists `refs/remotes/<remote>/HEAD`**, which `refLabels` leaves out.
+- **Graph rows are painted with raw escape codes** (`lanePaints`), taken
+  from rendering each lane style once per frame. A `Render` per colored run
+  made a 40-lane frame 5× slower.
 - **Destructive questions confirm only on `y`**, never on `enter`, so a
   stray keypress can't discard work.
 - **The diff cache has a 32 MiB budget** (`maxDiffCacheBytes`) and is cleared
   on every status refresh.
 - **`sectionList` builds `rows`/`rowOf` once in `setItems`.** Never rebuild
   them per keypress or frame; repos with huge untracked trees can have tens
-  of thousands of rows. Every list view (files, branches, the log later)
+  of thousands of rows. Every list view (files, branches, log, graph)
   embeds it and only adds rendering and selection restore.
 - **Footer hints are ordered by importance.** `Model.hints` drops them from
   the right when they don't fit but always keeps the last two (help and
@@ -193,6 +212,8 @@ this range:
 | Keypress + full frame at 220×60 with 50k files | ~0.3 ms | UI goroutine |
 | One frame of a 1 MiB diff | ~50 µs, independent of diff size | UI goroutine |
 | `splitDiff` of a 1 MiB diff | ~4 ms | background |
+| `layoutGraph` of 3,000 commits on 40 lanes | ~2 ms | background |
+| Keypress + frame of that graph | ~0.3 ms | UI goroutine |
 
 Anything proportional to repo or diff size belongs in a `tea.Cmd`, not in
 `Update` or `View`.
@@ -213,6 +234,7 @@ Anything proportional to repo or diff size belongs in a `tea.Cmd`, not in
 
 Done: milestone 1 (status, diff, stage/unstage, stage all, commit, help),
 discard (file and all, behind a y/n question), fullscreen diff (`enter`),
-branch view with checkout (`2`), log view (`3`). Each view gets its own
+branch view with checkout (`2`), log view (`3`), graph of all branches
+(`4`). Each view gets its own
 model file in `internal/ui` and its own git functions + tests in
 `internal/git`.

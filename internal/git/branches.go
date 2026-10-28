@@ -108,6 +108,11 @@ type Commit struct {
 	Hash    string // abbreviated
 	Date    time.Time
 	Subject string
+
+	// Set by Graph only.
+	ID      string   // full hash
+	Parents []string // full hashes
+	Refs    []string // full decorations, e.g. "HEAD -> refs/heads/main"
 }
 
 // Log returns the most recent n commits reachable from ref, newest first.
@@ -137,6 +142,52 @@ func ParseLog(data []byte) ([]Commit, error) {
 		c := Commit{Hash: f[0], Subject: f[2]}
 		if sec, err := strconv.ParseInt(f[1], 10, 64); err == nil {
 			c.Date = time.Unix(sec, 0)
+		}
+		out = append(out, c)
+	}
+	return out, nil
+}
+
+// graphFormat is one NUL-separated record per commit; the subject is last
+// and never contains a newline.
+const graphFormat = "%H%x00%h%x00%P%x00%ct%x00%D%x00%s"
+
+// Graph returns the most recent n commits of all local and remote-tracking
+// branches, and of HEAD when head is true (it can't be on an unborn
+// branch), in date order with children before their parents.
+func (r *Repo) Graph(ctx context.Context, n int, head bool) ([]Commit, error) {
+	args := []string{
+		"log", "--no-show-signature", "--date-order", "--decorate=full", "-n", strconv.Itoa(n),
+		"--no-color", "--format=" + graphFormat, "--branches", "--remotes",
+	}
+	if head {
+		args = append(args, "HEAD")
+	}
+	res, err := r.read(ctx, invocation{args: append(args, "--")})
+	if err != nil {
+		return nil, err
+	}
+	return ParseGraph(res.stdout)
+}
+
+// ParseGraph parses `git log --decorate=full --format=<graphFormat>` output.
+func ParseGraph(data []byte) ([]Commit, error) {
+	var out []Commit
+	for line := range bytes.Lines(data) {
+		line = bytes.TrimSuffix(line, []byte("\n"))
+		if len(line) == 0 {
+			continue
+		}
+		f := strings.SplitN(string(line), "\x00", 6)
+		if len(f) != 6 || f[0] == "" || f[1] == "" {
+			return nil, fmt.Errorf("parse graph: malformed record %q", line)
+		}
+		c := Commit{ID: f[0], Hash: f[1], Parents: strings.Fields(f[2]), Subject: f[5]}
+		if sec, err := strconv.ParseInt(f[3], 10, 64); err == nil {
+			c.Date = time.Unix(sec, 0)
+		}
+		if f[4] != "" {
+			c.Refs = strings.Split(f[4], ", ")
 		}
 		out = append(out, c)
 	}

@@ -12,20 +12,26 @@ import (
 	"github.com/skinleak/gitlume/internal/ui/theme"
 )
 
-// logList is the commit history of HEAD, newest first. It is loaded in
-// pages; more is true while git may have older commits than were loaded.
+// logList is a commit history, newest first: HEAD's for the log view, or
+// every branch's with lanes for the graph view. It is loaded in pages of
+// limit commits; more is true while git may have older commits than were
+// loaded.
 type logList struct {
 	sectionList[git.Commit]
+	graph  bool
+	lanes  [][]graphCell // one row per commit, graph only
+	seq    int
+	limit  int // commits requested from git; grows by logPage
 	loaded bool
 	more   bool
 	now    time.Time // when the list was loaded; ages are relative to it
 }
 
 // set replaces the commits, keeping the cursor on the same commit.
-func (l *logList) set(cs []git.Commit, more bool, now time.Time) {
+func (l *logList) set(cs []git.Commit, lanes [][]graphCell, more bool, now time.Time) {
 	prev, hadPrev := l.selected()
 	l.setItems(cs, func(a, b git.Commit) bool { return true })
-	l.more, l.now, l.loaded = more, now, true
+	l.lanes, l.more, l.now, l.loaded = lanes, more, now, true
 	cursor := 0
 	for i, c := range cs {
 		if hadPrev && c.Hash == prev.Hash {
@@ -44,21 +50,29 @@ func (l *logList) view(st theme.Styles, width int, focused bool) string {
 		return st.Muted.Render("No commits yet")
 	}
 	rows := l.visible()
+	var paints []lanePaint
+	if l.graph {
+		paints = lanePaints(st)
+	}
 	lines := make([]string, 0, len(rows))
 	for _, r := range rows {
-		lines = append(lines, l.renderRow(st, r, width, focused))
+		lines = append(lines, l.renderRow(st, paints, r, width, focused))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func (l *logList) renderRow(st theme.Styles, r listRow, width int, focused bool) string {
+func (l *logList) renderRow(st theme.Styles, paints []lanePaint, r listRow, width int, focused bool) string {
 	switch r.kind {
 	case rowHeader:
 		n := strconv.Itoa(r.count)
 		if l.more {
 			n += "+"
 		}
-		return st.Section.Render("Commits") + "  " + st.Muted.Render(n)
+		title := "Commits"
+		if l.graph {
+			title = "All branches"
+		}
+		return st.Section.Render(title) + "  " + st.Muted.Render(n)
 	case rowItem:
 		c := l.items[r.index]
 		prefix, subject := "  ", st.Text
@@ -67,6 +81,10 @@ func (l *logList) renderRow(st theme.Styles, r listRow, width int, focused bool)
 			if focused {
 				prefix, subject = st.Cursor.Render("› "), st.Cursor
 			}
+		}
+		if l.graph && r.index < len(l.lanes) {
+			line := renderGraph(paints, l.lanes[r.index]) + "  " + refLabels(st, c.Refs) + subject.Render(sanitize(c.Subject))
+			return ansi.Truncate(prefix+line, width, "…")
 		}
 		return ansi.Truncate(prefix+commitLine(st, c, l.now, subject), width, "…")
 	}
