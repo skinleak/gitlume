@@ -34,13 +34,14 @@ internal/git/            UI-free git wrapper; everything here is unit-testable
   repo.go                Open/ErrNotRepo, read (10s) and write (5m) timeouts
   status.go              porcelain v2 -z parser; Status.Changes(group)
   diff.go                per-change diff, capped at MaxDiffBytes
-  ops.go                 Stage, Unstage, StageAll, Commit
+  ops.go                 Stage, Unstage, StageAll, Commit, Discard, DiscardAll
 internal/ui/
   app.go                 root Model: key routing, layout, header/footer, async orchestration
   msgs.go                tea.Msg types + tea.Cmd constructors wrapping internal/git
   status.go              fileList: grouped rows, cursor, scrolling, selection restore
   diff.go                diffView: renders only visible lines, truncates (never wraps)
   commit.go              commit prompt (textinput)
+  confirm.go             y/n question guarding destructive operations
   help.go                help overlay generated from keys.KeyMap
   theme/                 the ONLY place colors and lipgloss styles are defined
   keys/                  the ONLY place keybindings are defined
@@ -78,7 +79,8 @@ internal/ui/
   Add a binding to `KeyMap` and to `FullHelp()`, and the help overlay picks
   it up.
 - **Keep the look calm:** no borders or boxes, one accent color, spacing
-  instead of separators. Added/removed colors are desaturated on purpose.
+  instead of separators. Colors are bright ANSI indices (SGR 90–97) so the
+  terminal theme decides the exact shades.
 - **No global mutable state.** Everything hangs off `Model` or `Repo`.
 - **Write a test for every new parser.** Capture real git output from a temp
   repo for fixtures rather than writing it from memory; format details such
@@ -119,7 +121,15 @@ internal/ui/
   `Error.Error()` uses the first `fatal:`/`error:` line of stderr, or else the
   last line of stdout.
 - **Untracked nested repositories** appear as `path/` and have no diff.
-  `Repo.Diff` returns a `Note` for them instead.
+  `Repo.Diff` returns a `Note` for them instead, and `Repo.Discard` refuses
+  to delete them (`ErrNestedRepo`).
+- **Discarding a file uses `git restore --source=HEAD --staged --worktree`**,
+  which fails on an unborn branch, so `Discard` falls back to `git rm -f`
+  there. A staged rename must be restored together with its source path,
+  even from the unstaged row. `git reset --hard` does work on an unborn
+  branch, so `DiscardAll` needs no special case.
+- **Destructive questions confirm only on `y`**, never on `enter`, so a
+  stray keypress can't discard work.
 - **The diff cache has a 32 MiB budget** (`maxDiffCacheBytes`) and is cleared
   on every status refresh.
 - **`fileList` builds `rows`/`rowOf` once in `setChanges`.** Never rebuild
@@ -155,6 +165,7 @@ Anything proportional to repo or diff size belongs in a `tea.Cmd`, not in
 
 ## Roadmap
 
-Done: milestone 1 (status, diff, stage/unstage, stage all, commit, help).
+Done: milestone 1 (status, diff, stage/unstage, stage all, commit, help),
+discard (file and all, behind a y/n question), fullscreen diff (`enter`).
 Next: log view, then branches. Each gets its own model file in `internal/ui`
 and its own git functions + tests in `internal/git`.

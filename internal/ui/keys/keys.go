@@ -11,8 +11,12 @@ type KeyMap struct {
 	Down       key.Binding
 	Toggle     key.Binding
 	StageAll   key.Binding
+	Discard    key.Binding
+	DiscardAll key.Binding
 	Commit     key.Binding
 	Focus      key.Binding
+	Open       key.Binding
+	Back       key.Binding
 	ScrollUp   key.Binding
 	ScrollDown key.Binding
 	Refresh    key.Binding
@@ -24,6 +28,12 @@ type KeyMap struct {
 type PromptKeyMap struct {
 	Confirm key.Binding
 	Cancel  key.Binding
+}
+
+// ConfirmKeyMap holds bindings active while a yes/no question is shown.
+type ConfirmKeyMap struct {
+	Yes key.Binding
+	No  key.Binding
 }
 
 // Default returns the default main-screen bindings.
@@ -45,6 +55,14 @@ func Default() KeyMap {
 			key.WithKeys("a"),
 			key.WithHelp("a", "stage all"),
 		),
+		Discard: key.NewBinding(
+			key.WithKeys("d"),
+			key.WithHelp("d", "discard file"),
+		),
+		DiscardAll: key.NewBinding(
+			key.WithKeys("D"),
+			key.WithHelp("D", "discard all"),
+		),
 		Commit: key.NewBinding(
 			key.WithKeys("c"),
 			key.WithHelp("c", "commit"),
@@ -52,6 +70,14 @@ func Default() KeyMap {
 		Focus: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("tab", "focus files / diff"),
+		),
+		Open: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "view diff"),
+		),
+		Back: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "back"),
 		),
 		ScrollUp: key.NewBinding(
 			key.WithKeys("ctrl+u", "pgup"),
@@ -90,16 +116,36 @@ func DefaultPrompt() PromptKeyMap {
 	}
 }
 
+// DefaultConfirm returns the yes/no question bindings. enter is not a
+// yes on purpose: these questions guard destructive operations.
+func DefaultConfirm() ConfirmKeyMap {
+	return ConfirmKeyMap{
+		Yes: key.NewBinding(
+			key.WithKeys("y"),
+			key.WithHelp("y", "yes"),
+		),
+		No: key.NewBinding(
+			key.WithKeys("n", "esc"),
+			key.WithHelp("n", "no"),
+		),
+	}
+}
+
 // ShortHelp is the one-line hint shown in the footer.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Toggle, k.StageAll, k.Commit, k.Help, k.Quit}
+	return []key.Binding{k.Toggle, k.StageAll, k.Discard, k.DiscardAll, k.Commit, k.Open, k.Help, k.Quit}
+}
+
+// DiffHelp is the footer hint while a diff is shown fullscreen.
+func (k KeyMap) DiffHelp() []key.Binding {
+	return []key.Binding{k.Down, k.Up, k.ScrollDown, k.ScrollUp, k.Back, k.Help}
 }
 
 // FullHelp is the grouped list shown in the help overlay.
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Up, k.Down, k.Focus, k.ScrollUp, k.ScrollDown},
-		{k.Toggle, k.StageAll, k.Commit, k.Refresh},
+		{k.Up, k.Down, k.Focus, k.ScrollUp, k.ScrollDown, k.Open, k.Back},
+		{k.Toggle, k.StageAll, k.Discard, k.DiscardAll, k.Commit, k.Refresh},
 		{k.Help, k.Quit},
 	}
 }
@@ -111,5 +157,15 @@ func (k PromptKeyMap) ShortHelp() []key.Binding {
 
 // FullHelp implements help.KeyMap.
 func (k PromptKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{k.ShortHelp()}
+}
+
+// ShortHelp is the hint shown next to a yes/no question.
+func (k ConfirmKeyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Yes, k.No}
+}
+
+// FullHelp implements help.KeyMap.
+func (k ConfirmKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{k.ShortHelp()}
 }

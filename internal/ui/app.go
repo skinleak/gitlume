@@ -42,15 +42,17 @@ const (
 
 // Model is the root Bubble Tea model.
 type Model struct {
-	repo       *git.Repo
-	keys       keys.KeyMap
-	promptKeys keys.PromptKeyMap
-	styles     theme.Styles
-	help       help.Model
+	repo        *git.Repo
+	keys        keys.KeyMap
+	promptKeys  keys.PromptKeyMap
+	confirmKeys keys.ConfirmKeyMap
+	styles      theme.Styles
+	help        help.Model
 
-	files  fileList
-	diff   diffView
-	commit commitPrompt
+	files   fileList
+	diff    diffView
+	commit  commitPrompt
+	confirm confirmPrompt
 
 	branch    git.Branch
 	statusSeq int
@@ -60,6 +62,7 @@ type Model struct {
 
 	focus    focusArea
 	showHelp bool
+	zoomed   bool // the diff fills the body
 	busy     bool // a mutating git command is running
 	message  string
 	isErr    bool
@@ -71,13 +74,14 @@ type Model struct {
 func New(repo *git.Repo) Model {
 	st := theme.Default()
 	return Model{
-		repo:       repo,
-		keys:       keys.Default(),
-		promptKeys: keys.DefaultPrompt(),
-		styles:     st,
-		help:       newHelp(st),
-		commit:     newCommitPrompt(st),
-		diffCache:  make(map[diffKey]diffContent),
+		repo:        repo,
+		keys:        keys.Default(),
+		promptKeys:  keys.DefaultPrompt(),
+		confirmKeys: keys.DefaultConfirm(),
+		styles:      st,
+		help:        newHelp(st),
+		commit:      newCommitPrompt(st),
+		diffCache:   make(map[diffKey]diffContent),
 	}
 }
 
@@ -118,6 +122,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.commit.active {
 		return m, m.handleCommitKey(msg)
 	}
+	if m.confirm.active {
+		return m, m.handleConfirmKey(msg)
+	}
 	m.message, m.isErr = "", false
 
 	if m.showHelp {
@@ -128,6 +135,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.showHelp = false
 		}
 		return m, nil
+	}
+
+	if m.zoomed {
+		return m, m.handleZoomedKey(msg)
 	}
 
 	switch {
@@ -151,6 +162,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.toggleSelected()
 	case key.Matches(msg, m.keys.StageAll):
 		return m, m.stageAll()
+	case key.Matches(msg, m.keys.Discard):
+		m.askDiscard()
+	case key.Matches(msg, m.keys.DiscardAll):
+		m.askDiscardAll()
+	case key.Matches(msg, m.keys.Open):
+		m.setZoom(true)
 	case key.Matches(msg, m.keys.Commit):
 		return m, m.openCommit()
 	}
@@ -182,6 +199,57 @@ func (m *Model) handleCommitKey(msg tea.KeyMsg) tea.Cmd {
 		})
 	}
 	return m.commit.update(msg)
+}
+
+// handleZoomedKey handles keys while the diff is fullscreen. Only viewing
+// keys work here, so nothing changes the repository by surprise.
+func (m *Model) handleZoomedKey(msg tea.KeyMsg) tea.Cmd {
+	switch {
+	case key.Matches(msg, m.keys.Quit):
+		return tea.Quit
+	case key.Matches(msg, m.keys.Back, m.keys.Open):
+		m.setZoom(false)
+	case key.Matches(msg, m.keys.Help):
+		m.showHelp = true
+	case key.Matches(msg, m.keys.Refresh):
+		return m.refresh()
+	case key.Matches(msg, m.keys.Down):
+		m.diff.scroll(1)
+	case key.Matches(msg, m.keys.Up):
+		m.diff.scroll(-1)
+	case key.Matches(msg, m.keys.ScrollDown):
+		m.diff.scroll(m.diff.height / 2)
+	case key.Matches(msg, m.keys.ScrollUp):
+		m.diff.scroll(-m.diff.height / 2)
+	}
+	return nil
+}
+
+func (m *Model) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
+	m.message, m.isErr = "", false
+	switch {
+	case key.Matches(msg, m.confirmKeys.No):
+		m.confirm.close()
+	case key.Matches(msg, m.confirmKeys.Yes):
+		if m.busy {
+			// Keep the question; the user can press y again.
+			m.setMessage("Still working, try again in a moment", nil)
+			return nil
+		}
+		done, op := m.confirm.done, m.confirm.op
+		m.confirm.close()
+		return m.startOp("", done, op)
+	}
+	return nil
+}
+
+// setZoom shows the selected diff fullscreen or returns to the panes.
+func (m *Model) setZoom(on bool) {
+	if _, ok := m.files.selected(); on && !ok {
+		return
+	}
+	m.zoomed = on
+	m.resize()
 }
 
 func (m *Model) toggleFocus() {
@@ -232,6 +300,40 @@ func (m *Model) stageAll() tea.Cmd {
 	return m.startOp("", "", m.repo.StageAll)
 }
 
+func (m *Model) askDiscard() {
+	c, ok := m.files.selected()
+	if !ok {
+		return
+	}
+	if c.Group == git.Untracked && strings.HasSuffix(c.Path, "/") {
+		m.setMessage("", git.ErrNestedRepo)
+		return
+	}
+	question := "Discard all changes to " + displayPath(c) + "? This cannot be undone."
+	if c.Group == git.Untracked {
+		question = "Delete untracked " + sanitize(c.Path) + "? This cannot be undone."
+	}
+	// A staged rename must be restored together with its source path, even
+	// when the unstaged row of the same file is selected.
+	var extra []string
+	if orig := m.files.renameSource(c.Path); orig != "" && c.Group != git.Untracked {
+		extra = []string{orig}
+	}
+	repo := m.repo
+	m.confirm.ask(question, "Discarded "+sanitize(c.Path), func(ctx context.Context) error {
+		return repo.Discard(ctx, c, extra...)
+	})
+}
+
+func (m *Model) askDiscardAll() {
+	if len(m.files.changes) == 0 {
+		m.setMessage("Nothing to discard", nil)
+		return
+	}
+	m.confirm.ask("Discard ALL uncommitted changes and delete untracked files? This cannot be undone.",
+		"Discarded all changes", m.repo.DiscardAll)
+}
+
 func (m *Model) openCommit() tea.Cmd {
 	if m.files.count(git.Staged) == 0 {
 		m.setMessage("Nothing staged to commit", nil)
@@ -269,6 +371,9 @@ func (m *Model) applyStatus(msg statusLoadedMsg) tea.Cmd {
 	m.branch = msg.status.Branch
 	m.files.setChanges(allChanges(msg.status))
 	m.clearDiffCache()
+	if _, ok := m.files.selected(); !ok && m.zoomed {
+		m.setZoom(false)
+	}
 	return m.requestDiff()
 }
 
@@ -340,6 +445,9 @@ func (m Model) innerWidth() int { return max(1, m.width-2*padX) }
 func (m Model) layout() layout {
 	w := m.innerWidth()
 	bodyH := max(2, m.height-chromeHeight)
+	if m.zoomed {
+		return layout{diffW: w, diffH: bodyH}
+	}
 	if w < stackBelow {
 		listH := max(1, bodyH*2/5)
 		return layout{listW: w, listH: listH, diffW: w, diffH: max(1, bodyH-listH-1), stacked: true}
@@ -350,7 +458,10 @@ func (m Model) layout() layout {
 
 func (m *Model) resize() {
 	l := m.layout()
-	m.files.setHeight(l.listH)
+	if !m.zoomed {
+		// The list keeps its scroll position while hidden.
+		m.files.setHeight(l.listH)
+	}
 	m.diff.setHeight(l.diffH)
 	m.help.Width = m.innerWidth()
 	m.commit.input.Width = m.commitInputWidth()
@@ -388,6 +499,9 @@ func (m Model) View() string {
 }
 
 func (m Model) bodyView(l layout) string {
+	if m.zoomed {
+		return m.diff.view(m.styles, l.diffW)
+	}
 	list := lipgloss.NewStyle().Width(l.listW).Render(
 		m.files.view(m.styles, l.listW, m.focus == focusFiles))
 	diff := m.diff.view(m.styles, l.diffW)
@@ -420,6 +534,9 @@ func (m Model) headerView() string {
 	if m.branch.Behind > 0 {
 		parts = append(parts, st.Muted.Render("↓"+strconv.Itoa(m.branch.Behind)))
 	}
+	if c, ok := m.files.selected(); ok && m.zoomed {
+		parts = append(parts, st.Text.Render(displayPath(c)))
+	}
 	return ansi.Truncate(strings.Join(parts, "  "), m.innerWidth(), "…")
 }
 
@@ -437,8 +554,21 @@ func (m Model) footerLine() string {
 		gap := max(paneGap, m.innerWidth()-ansi.StringWidth(prompt)-ansi.StringWidth(hint))
 		return prompt + strings.Repeat(" ", gap) + hint
 	}
+	if m.confirm.active {
+		hint := m.help.ShortHelpView(m.confirmKeys.ShortHelp())
+		if m.message != "" {
+			hint = m.messageView()
+		}
+		// Shorten the question, never the y/n hint.
+		room := max(1, m.innerWidth()-ansi.StringWidth(hint)-paneGap)
+		question := ansi.Truncate(m.confirm.view(m.styles), room, "…")
+		return question + strings.Repeat(" ", paneGap) + hint
+	}
 	if m.message != "" {
 		return m.messageView()
+	}
+	if m.zoomed {
+		return m.help.ShortHelpView(m.keys.DiffHelp())
 	}
 	return m.help.ShortHelpView(m.keys.ShortHelp())
 }

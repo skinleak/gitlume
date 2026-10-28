@@ -5,29 +5,40 @@ package theme
 import "github.com/charmbracelet/lipgloss"
 
 // Palette is the small set of colors the whole UI is built from.
-// Each color adapts to light and dark terminal backgrounds.
+// Colors are ANSI indices, so the terminal's own theme decides the exact
+// shades and gitlume matches the rest of the user's CLI.
 type Palette struct {
-	Text    lipgloss.AdaptiveColor
-	Muted   lipgloss.AdaptiveColor
-	Subtle  lipgloss.AdaptiveColor
-	Accent  lipgloss.AdaptiveColor
-	Added   lipgloss.AdaptiveColor
-	Removed lipgloss.AdaptiveColor
-	Error   lipgloss.AdaptiveColor
+	Text    lipgloss.TerminalColor
+	Muted   lipgloss.TerminalColor
+	Subtle  lipgloss.TerminalColor
+	Accent  lipgloss.TerminalColor
+	Added   lipgloss.TerminalColor
+	Removed lipgloss.TerminalColor
+	Error   lipgloss.TerminalColor
 }
 
-// DefaultPalette is calm and low-contrast with one soft accent.
-// Added/Removed are deliberately desaturated so diffs stay readable
-// without competing with the accent.
+// The bright ANSI colors (SGR 90–97).
+const (
+	brightBlack  = lipgloss.Color("8")
+	brightRed    = lipgloss.Color("9")
+	brightGreen  = lipgloss.Color("10")
+	brightBlue   = lipgloss.Color("12")
+	brightWhite  = lipgloss.Color("15")
+	regularBlack = lipgloss.Color("0")
+)
+
+// DefaultPalette uses the bright ANSI colors with one accent (blue).
+// Text falls back to black on light backgrounds, where bright white
+// would be invisible.
 func DefaultPalette() Palette {
 	return Palette{
-		Text:    lipgloss.AdaptiveColor{Light: "#2E3440", Dark: "#D8DEE9"},
-		Muted:   lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#7B8394"},
-		Subtle:  lipgloss.AdaptiveColor{Light: "#B8BEC8", Dark: "#4C5564"},
-		Accent:  lipgloss.AdaptiveColor{Light: "#4C78A8", Dark: "#88B4E0"},
-		Added:   lipgloss.AdaptiveColor{Light: "#4F7A4F", Dark: "#9CC59C"},
-		Removed: lipgloss.AdaptiveColor{Light: "#A35454", Dark: "#D49A9A"},
-		Error:   lipgloss.AdaptiveColor{Light: "#A35454", Dark: "#D49A9A"},
+		Text:    lipgloss.AdaptiveColor{Light: string(regularBlack), Dark: string(brightWhite)},
+		Muted:   brightBlack,
+		Subtle:  brightBlack,
+		Accent:  brightBlue,
+		Added:   brightGreen,
+		Removed: brightRed,
+		Error:   brightRed,
 	}
 }
 
@@ -50,6 +61,7 @@ type Styles struct {
 	Error   lipgloss.Style
 	Info    lipgloss.Style
 	Prompt  lipgloss.Style
+	Confirm lipgloss.Style
 	HelpKey lipgloss.Style
 	HelpDsc lipgloss.Style
 	HelpSep lipgloss.Style
@@ -61,12 +73,12 @@ func New(p Palette) Styles {
 	return Styles{
 		Branch:   s().Foreground(p.Accent).Bold(true),
 		Muted:    s().Foreground(p.Muted),
-		Subtle:   s().Foreground(p.Subtle),
+		Subtle:   s().Foreground(p.Subtle).Faint(true),
 		Text:     s().Foreground(p.Text),
 		Section:  s().Foreground(p.Muted).Bold(true),
 		Selected: s().Foreground(p.Accent),
 		Cursor:   s().Foreground(p.Accent).Bold(true),
-		Dimmed:   s().Foreground(p.Subtle),
+		Dimmed:   s().Foreground(p.Subtle).Faint(true),
 
 		DiffAdd:  s().Foreground(p.Added),
 		DiffDel:  s().Foreground(p.Removed),
@@ -76,9 +88,10 @@ func New(p Palette) Styles {
 		Error:   s().Foreground(p.Error),
 		Info:    s().Foreground(p.Muted),
 		Prompt:  s().Foreground(p.Accent).Bold(true),
+		Confirm: s().Foreground(p.Error).Bold(true),
 		HelpKey: s().Foreground(p.Accent),
 		HelpDsc: s().Foreground(p.Muted),
-		HelpSep: s().Foreground(p.Subtle),
+		HelpSep: s().Foreground(p.Subtle).Faint(true),
 	}
 }
 

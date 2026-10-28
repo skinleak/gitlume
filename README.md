@@ -2,7 +2,7 @@
 
 A calm, minimal terminal UI for git.
 
-gitlume shows what changed, lets you stage it, and lets you commit it. No
+gitlume shows what changed, lets you stage, discard and commit it. No
 boxes, no clutter: one accent color, generous spacing, and keybindings you
 can discover with `?`.
 
@@ -19,7 +19,7 @@ can discover with `?`.
   Untracked  1
     ? notes.md
 
-  space stage / unstage · a stage all · c commit · ? help · q quit
+  space stage / unstage · a stage all · d discard file · D discard all · c commit · …
 ```
 
 ## Install
@@ -39,8 +39,11 @@ Run `gitlume` anywhere inside a git work tree.
 | `j` / `k`, `↓` `↑` | Move through files (or scroll the diff) |
 | `tab`            | Switch focus between files and diff   |
 | `ctrl+d` / `ctrl+u` | Scroll the diff by half a page      |
+| `enter`          | View the selected diff fullscreen (`esc` to go back) |
 | `space`          | Stage or unstage the selected file    |
 | `a`              | Stage everything                      |
+| `d`              | Discard all changes to the selected file (asks first) |
+| `D`              | Discard all uncommitted changes, including untracked files (asks first) |
 | `c`              | Commit (`enter` to confirm, `esc` to cancel) |
 | `r`              | Refresh                               |
 | `?`              | Show all keybindings                  |

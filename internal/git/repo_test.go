@@ -303,3 +303,156 @@ func TestErrorSummary(t *testing.T) {
 		}
 	}
 }
+
+func readFile(t *testing.T, dir, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func exists(dir, name string) bool {
+	_, err := os.Lstat(filepath.Join(dir, name))
+	return err == nil
+}
+
+func TestDiscardStagedAndUnstaged(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	writeFile(t, r.Root(), "tracked.txt", "staged\n")
+	gitCmd(t, r.Root(), "add", "tracked.txt")
+	writeFile(t, r.Root(), "tracked.txt", "staged\nand unstaged\n")
+
+	if err := r.Discard(ctx, Change{Group: Unstaged, Path: "tracked.txt"}); err != nil {
+		t.Fatalf("Discard: %v", err)
+	}
+	if st := mustStatus(t, r); len(st.Entries) != 0 {
+		t.Fatalf("entries after discard = %+v, want none", st.Entries)
+	}
+	if got := readFile(t, r.Root(), "tracked.txt"); got != "one\n" {
+		t.Errorf("content = %q, want HEAD's %q", got, "one\n")
+	}
+}
+
+func TestDiscardAddedFileRemovesIt(t *testing.T) {
+	r := newTestRepo(t)
+	writeFile(t, r.Root(), "added.txt", "new\n")
+	gitCmd(t, r.Root(), "add", "added.txt")
+
+	if err := r.Discard(context.Background(), Change{Group: Staged, Path: "added.txt"}); err != nil {
+		t.Fatalf("Discard: %v", err)
+	}
+	if exists(r.Root(), "added.txt") || len(mustStatus(t, r).Entries) != 0 {
+		t.Fatal("added file survived discard")
+	}
+}
+
+func TestDiscardStagedRenameRestoresSource(t *testing.T) {
+	r := newTestRepo(t)
+	gitCmd(t, r.Root(), "mv", "tracked.txt", "moved.txt")
+	writeFile(t, r.Root(), "moved.txt", "one\nedited\n")
+
+	// The unstaged row of a rename has no OrigPath; the caller passes it.
+	if err := r.Discard(context.Background(), Change{Group: Unstaged, Path: "moved.txt"}, "tracked.txt"); err != nil {
+		t.Fatalf("Discard: %v", err)
+	}
+	if exists(r.Root(), "moved.txt") || !exists(r.Root(), "tracked.txt") {
+		t.Fatal("rename not undone")
+	}
+	if st := mustStatus(t, r); len(st.Entries) != 0 {
+		t.Fatalf("entries after discard = %+v, want none", st.Entries)
+	}
+}
+
+func TestDiscardConflict(t *testing.T) {
+	r := newTestRepo(t)
+	gitCmd(t, r.Root(), "checkout", "-q", "-b", "other")
+	writeFile(t, r.Root(), "tracked.txt", "other\n")
+	gitCmd(t, r.Root(), "commit", "-q", "-am", "other")
+	gitCmd(t, r.Root(), "checkout", "-q", "main")
+	writeFile(t, r.Root(), "tracked.txt", "main\n")
+	gitCmd(t, r.Root(), "commit", "-q", "-am", "main")
+	cmd := exec.Command("git", "merge", "-q", "other")
+	cmd.Dir = r.Root()
+	_ = cmd.Run() // conflicts, as intended
+
+	if err := r.Discard(context.Background(), Change{Group: Unstaged, Code: 'U', Path: "tracked.txt"}); err != nil {
+		t.Fatalf("Discard: %v", err)
+	}
+	if got := readFile(t, r.Root(), "tracked.txt"); got != "main\n" {
+		t.Errorf("content = %q, want HEAD's %q", got, "main\n")
+	}
+}
+
+func TestDiscardUntrackedDeletesFile(t *testing.T) {
+	r := newTestRepo(t)
+	writeFile(t, r.Root(), "dir/*.txt", "x\n")
+	writeFile(t, r.Root(), "dir/keep.txt", "x\n")
+
+	if err := r.Discard(context.Background(), Change{Group: Untracked, Path: "dir/*.txt"}); err != nil {
+		t.Fatalf("Discard: %v", err)
+	}
+	if exists(r.Root(), "dir/*.txt") || !exists(r.Root(), "dir/keep.txt") {
+		t.Fatal("discard did not delete exactly the selected file")
+	}
+}
+
+func TestDiscardRefusesNestedRepo(t *testing.T) {
+	r := newTestRepo(t)
+	gitCmd(t, r.Root(), "init", "-q", "nested")
+	err := r.Discard(context.Background(), Change{Group: Untracked, Path: "nested/"})
+	if !errors.Is(err, ErrNestedRepo) || !exists(r.Root(), "nested/.git") {
+		t.Fatalf("Discard = %v; want ErrNestedRepo and the repo kept", err)
+	}
+}
+
+func TestDiscardOnUnbornBranch(t *testing.T) {
+	r := newTestRepo(t)
+	gitCmd(t, r.Root(), "checkout", "-q", "--orphan", "fresh")
+	writeFile(t, r.Root(), "tracked.txt", "edited\n")
+
+	if err := r.Discard(context.Background(), Change{Group: Unstaged, Path: "tracked.txt"}); err != nil {
+		t.Fatalf("Discard: %v", err)
+	}
+	if exists(r.Root(), "tracked.txt") || len(mustStatus(t, r).Entries) != 0 {
+		t.Fatal("file survived discard on unborn branch")
+	}
+}
+
+func TestDiscardAll(t *testing.T) {
+	r := newTestRepo(t)
+	writeFile(t, r.Root(), ".gitignore", "ignored.txt\n")
+	gitCmd(t, r.Root(), "add", ".gitignore")
+	gitCmd(t, r.Root(), "commit", "-q", "-m", "ignore")
+	writeFile(t, r.Root(), "tracked.txt", "edited\n")
+	writeFile(t, r.Root(), "staged.txt", "s\n")
+	gitCmd(t, r.Root(), "add", "staged.txt")
+	writeFile(t, r.Root(), "dir/untracked.txt", "u\n")
+	writeFile(t, r.Root(), "ignored.txt", "keep me\n")
+
+	if err := r.DiscardAll(context.Background()); err != nil {
+		t.Fatalf("DiscardAll: %v", err)
+	}
+	if st := mustStatus(t, r); len(st.Entries) != 0 {
+		t.Fatalf("entries after discard all = %+v, want none", st.Entries)
+	}
+	if exists(r.Root(), "dir") || !exists(r.Root(), "ignored.txt") {
+		t.Error("untracked dir must be deleted and ignored files kept")
+	}
+	if got := readFile(t, r.Root(), "tracked.txt"); got != "one\n" {
+		t.Errorf("content = %q, want HEAD's %q", got, "one\n")
+	}
+}
+
+func TestDiscardAllOnUnbornBranch(t *testing.T) {
+	r := newTestRepo(t)
+	gitCmd(t, r.Root(), "checkout", "-q", "--orphan", "fresh")
+	if err := r.DiscardAll(context.Background()); err != nil {
+		t.Fatalf("DiscardAll: %v", err)
+	}
+	if st := mustStatus(t, r); len(st.Entries) != 0 || exists(r.Root(), "tracked.txt") {
+		t.Fatalf("entries after discard all = %+v, want none", st.Entries)
+	}
+}

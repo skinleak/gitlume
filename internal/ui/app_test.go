@@ -116,7 +116,7 @@ func TestViewFitsWindow(t *testing.T) {
 	m, _ := newTestModel(t)
 	for _, size := range [][2]int{{100, 30}, {60, 20}, {200, 50}, {30, 8}, {20, 4}, {10, 2}} {
 		m = pump(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		for _, mode := range []string{"main", "help", "commit"} {
+		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm"} {
 			mm := m
 			switch mode {
 			case "help":
@@ -124,6 +124,13 @@ func TestViewFitsWindow(t *testing.T) {
 			case "commit":
 				mm = pump(t, mm, keyPress("a"))
 				mm = pump(t, mm, keyPress("c"))
+			case "zoom":
+				mm = pump(t, mm, keyPress("enter"))
+			case "zoom help":
+				mm = pump(t, mm, keyPress("enter"))
+				mm = pump(t, mm, keyPress("?"))
+			case "confirm":
+				mm = pump(t, mm, keyPress("D"))
 			}
 			lines := strings.Split(plainView(mm), "\n")
 			if len(lines) != size[1] {
@@ -313,5 +320,89 @@ func TestControlCharsInFileName(t *testing.T) {
 	}
 	if !strings.Contains(ansi.Strip(v), "evil?[2Jname.txt") {
 		t.Errorf("sanitized name not shown:\n%s", ansi.Strip(v))
+	}
+}
+
+func TestDiscardAsksFirst(t *testing.T) {
+	m, dir := newTestModel(t)
+	m = pump(t, m, keyPress("d"))
+	if !m.confirm.active || !strings.Contains(plainView(m), "Discard all changes to a.txt?") {
+		t.Fatalf("no confirmation shown:\n%s", plainView(m))
+	}
+	// Only an explicit y confirms; other keys, including enter, do nothing.
+	for _, k := range []string{"enter", " ", "j", "n"} {
+		m = pump(t, m, keyPress(k))
+	}
+	if m.confirm.active {
+		t.Fatal("n did not close the question")
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "a.txt")); string(got) != "one\ntwo\n" {
+		t.Fatalf("a.txt changed without confirmation: %q", got)
+	}
+
+	m = pump(t, m, keyPress("d"))
+	m = pump(t, m, keyPress("y"))
+	if got, _ := os.ReadFile(filepath.Join(dir, "a.txt")); string(got) != "one\n" {
+		t.Errorf("a.txt = %q after discard, want %q", got, "one\n")
+	}
+	if n := m.files.count(git.Unstaged); n != 1 {
+		t.Errorf("unstaged = %d after discard, want 1", n)
+	}
+	if !strings.Contains(plainView(m), "Discarded a.txt") {
+		t.Errorf("no confirmation message:\n%s", plainView(m))
+	}
+}
+
+func TestDiscardAll(t *testing.T) {
+	m, dir := newTestModel(t)
+	write(t, dir, "new.txt", "x\n")
+	m = pump(t, m, keyPress("r"))
+	m = pump(t, m, keyPress("D"))
+	m = pump(t, m, keyPress("esc"))
+	if m.confirm.active || len(m.files.changes) != 3 {
+		t.Fatalf("esc: active = %v, changes = %d; want closed and untouched", m.confirm.active, len(m.files.changes))
+	}
+	m = pump(t, m, keyPress("D"))
+	m = pump(t, m, keyPress("y"))
+	if v := plainView(m); !strings.Contains(v, "Working tree clean") {
+		t.Errorf("after discard all:\n%s", v)
+	}
+	m = pump(t, m, keyPress("D"))
+	if m.confirm.active {
+		t.Error("asked to discard a clean tree")
+	}
+}
+
+func TestZoomedDiff(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = pump(t, m, keyPress("enter"))
+	if !m.zoomed || m.diff.height != m.height-chromeHeight {
+		t.Fatalf("zoomed = %v, diff height = %d; want fullscreen", m.zoomed, m.diff.height)
+	}
+	v := plainView(m)
+	if !strings.Contains(v, "+two") || strings.Contains(v, "Unstaged") {
+		t.Errorf("zoomed view should show only the diff:\n%s", v)
+	}
+
+	// Viewing keys only: j scrolls the diff, space does not stage.
+	cursor := m.files.cursor
+	m = pump(t, m, keyPress("j"))
+	m = pump(t, m, keyPress(" "))
+	if m.files.cursor != cursor || m.files.count(git.Staged) != 0 {
+		t.Error("keys in the zoomed diff changed the file list")
+	}
+
+	m = pump(t, m, keyPress("esc"))
+	if m.zoomed || !strings.Contains(plainView(m), "Unstaged") {
+		t.Errorf("esc did not return to the panes:\n%s", plainView(m))
+	}
+}
+
+func TestConfirmHintVisibleWhenNarrow(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = pump(t, m, tea.WindowSizeMsg{Width: 50, Height: 20})
+	m = pump(t, m, keyPress("D"))
+	if v := plainView(m); !strings.Contains(v, "y yes · n no") {
+		t.Errorf("y/n hint cut off:\n%s", v)
 	}
 }

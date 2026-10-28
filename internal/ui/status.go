@@ -68,6 +68,16 @@ func (l *fileList) count(g git.Group) int {
 	return n
 }
 
+// renameSource returns the source path of a staged rename to path, or "".
+func (l *fileList) renameSource(path string) string {
+	for _, c := range l.changes {
+		if c.Path == path && c.OrigPath != "" {
+			return c.OrigPath
+		}
+	}
+	return ""
+}
+
 // move shifts the cursor by delta and reports whether it changed.
 func (l *fileList) move(delta int) bool {
 	next := clamp(l.cursor+delta, 0, len(l.changes)-1)
