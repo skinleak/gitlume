@@ -20,6 +20,8 @@ type diffKey struct {
 
 func keyOf(c git.Change) diffKey { return diffKey{group: c.Group, path: c.Path} }
 
+func (k diffKey) isCommit() bool { return k.commit != "" }
+
 // diffContent is a loaded diff, cached per diffKey.
 type diffContent struct {
 	lines     []string

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -16,12 +17,20 @@ import (
 const diffDebounce = 30 * time.Millisecond
 
 // statusLoadedMsg carries a fresh git status. seq identifies the request
-// so out-of-order replies can be dropped.
+// so out-of-order replies can be dropped. A poll also reports whether the
+// status is the same as the one it was compared with.
 type statusLoadedMsg struct {
-	seq    int
-	status git.Status
-	err    error
+	seq       int
+	status    git.Status
+	poll      bool
+	unchanged bool
+	took      time.Duration // how long git status ran, to pace polling
+	at        time.Time     // when it finished
+	err       error
 }
+
+// pollTickMsg asks for a background status check.
+type pollTickMsg struct{ at time.Time }
 
 // diffTickMsg fires after the debounce delay for diff request seq.
 type diffTickMsg struct{ seq int }
@@ -72,20 +81,29 @@ type opDoneMsg struct {
 	err  error
 }
 
-func loadStatus(repo *git.Repo, seq int) tea.Cmd {
+// loadStatus runs git status. For a poll it also compares the result with
+// prev here, off the UI goroutine, since a status can have 50k entries.
+func loadStatus(repo *git.Repo, seq int, poll bool, prev git.Status) tea.Cmd {
 	return func() tea.Msg {
+		start := time.Now()
 		st, err := repo.Status(context.Background())
-		return statusLoadedMsg{seq: seq, status: st, err: err}
+		msg := statusLoadedMsg{seq: seq, status: st, poll: poll, took: time.Since(start), at: time.Now(), err: err}
+		msg.unchanged = poll && err == nil && st.Branch == prev.Branch && slices.Equal(st.Entries, prev.Entries)
+		return msg
 	}
+}
+
+func pollTick(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg { return pollTickMsg{at: t} })
 }
 
 func diffTick(seq int) tea.Cmd {
 	return tea.Tick(diffDebounce, func(time.Time) tea.Msg { return diffTickMsg{seq: seq} })
 }
 
-func loadDiff(repo *git.Repo, seq int, c git.Change) tea.Cmd {
+func loadDiff(ctx context.Context, repo *git.Repo, seq int, c git.Change) tea.Cmd {
 	return func() tea.Msg {
-		d, err := repo.Diff(context.Background(), c)
+		d, err := repo.Diff(ctx, c)
 		if err != nil {
 			return diffLoadedMsg{seq: seq, key: keyOf(c), err: err}
 		}
@@ -113,25 +131,25 @@ func commitsTick(seq int) tea.Cmd {
 	return tea.Tick(diffDebounce, func(time.Time) tea.Msg { return commitsTickMsg{seq: seq} })
 }
 
-func loadCommits(repo *git.Repo, seq int, ref string) tea.Cmd {
+func loadCommits(ctx context.Context, repo *git.Repo, seq int, ref string) tea.Cmd {
 	return func() tea.Msg {
-		cs, err := repo.Log(context.Background(), ref, branchLogLength)
+		cs, err := repo.Log(ctx, ref, branchLogLength)
 		return commitsLoadedMsg{seq: seq, ref: ref, commits: cs, err: err}
 	}
 }
 
-func loadLog(repo *git.Repo, seq, limit int) tea.Cmd {
+func loadLog(ctx context.Context, repo *git.Repo, seq, limit int) tea.Cmd {
 	return func() tea.Msg {
-		cs, err := repo.Log(context.Background(), "HEAD", limit)
+		cs, err := repo.Log(ctx, "HEAD", limit)
 		return logLoadedMsg{seq: seq, commits: cs, limit: limit, now: time.Now(), err: err}
 	}
 }
 
 // loadGraph loads all branches' history and lays out its lanes. head adds
 // HEAD, which an unborn branch doesn't have.
-func loadGraph(repo *git.Repo, seq, limit int, head bool) tea.Cmd {
+func loadGraph(ctx context.Context, repo *git.Repo, seq, limit int, head bool) tea.Cmd {
 	return func() tea.Msg {
-		cs, err := repo.Graph(context.Background(), limit, head)
+		cs, err := repo.Graph(ctx, limit, head)
 		msg := logLoadedMsg{seq: seq, graph: true, commits: cs, limit: limit, now: time.Now(), err: err}
 		if err == nil {
 			msg.lanes = layoutGraph(cs)
@@ -141,10 +159,10 @@ func loadGraph(repo *git.Repo, seq, limit int, head bool) tea.Cmd {
 }
 
 // loadShow loads one commit for the diff pane; statWidth is the pane width.
-func loadShow(repo *git.Repo, seq int, hash string, statWidth int) tea.Cmd {
+func loadShow(ctx context.Context, repo *git.Repo, seq int, hash string, statWidth int) tea.Cmd {
 	return func() tea.Msg {
 		key := diffKey{commit: hash}
-		d, err := repo.Show(context.Background(), hash, statWidth)
+		d, err := repo.Show(ctx, hash, statWidth)
 		if err != nil {
 			return diffLoadedMsg{seq: seq, key: key, err: err}
 		}
@@ -158,6 +176,26 @@ func loadShow(repo *git.Repo, seq int, hash string, statWidth int) tea.Cmd {
 		}
 		content := diffContent{lines: lines, truncated: d.Truncated, size: len(d.Text), header: header}
 		return diffLoadedMsg{seq: seq, key: key, content: content}
+	}
+}
+
+// request holds the cancel func of a running load. Starting the next load
+// of the same kind kills the git process of the previous one, whose reply
+// would be dropped anyway, so holding j over large diffs never piles up
+// git processes.
+type request struct{ cancel context.CancelFunc }
+
+func (r *request) start() context.Context {
+	r.stop()
+	ctx, cancel := context.WithCancel(context.Background())
+	r.cancel = cancel
+	return ctx
+}
+
+func (r *request) stop() {
+	if r.cancel != nil {
+		r.cancel()
+		r.cancel = nil
 	}
 }
 

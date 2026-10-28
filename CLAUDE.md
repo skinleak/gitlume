@@ -69,7 +69,8 @@ internal/git/            UI-free git wrapper; everything here is unit-testable
   branches.go            for-each-ref and log parsers; Branches, Log, Graph, Show, Checkout
 internal/ui/
   app.go                 root Model: key routing, layout, header/footer, async orchestration
-  msgs.go                tea.Msg types + tea.Cmd constructors wrapping internal/git
+  msgs.go                tea.Msg types + tea.Cmd constructors wrapping internal/git;
+                         `request` cancels a superseded load's git process
   list.go                sectionList[T]: sectioned rows, cursor, scrolling (shared)
   status.go              fileList: change rows and selection restore
   diff.go                diffView: renders only visible lines, truncates (never wraps)
@@ -87,20 +88,34 @@ tools/preview/           drives the real Model through a script, writes docs/pre
 
 ### Data flow
 
-1. A key press or `tea.FocusMsg` leads to `refresh()`, which increments
-   `statusSeq` and returns `loadStatus`.
-2. `statusLoadedMsg` is applied only if its `seq` matches. The file list keeps
-   the selection, the diff cache is cleared, and `requestDiff()` runs.
-3. `requestDiff()` serves the diff from `diffCache` if it can. Otherwise it
+1. A key press, `tea.FocusMsg` or finished operation leads to `refresh()`.
+   Only one status load runs at a time (`loading`): a refresh asked for
+   meanwhile sets `reload` and starts when the running one is applied.
+2. Polling: `Init` starts a `pollTickMsg` chain. A tick loads the status
+   in the background unless a load, operation or prompt is active or a
+   status arrived within half an interval. The interval is 50× the last
+   status's run time, between 2 s and 60 s, so polling stays under ~2%
+   of a core in any repo. A poll compares the result with `Model.status`
+   inside the `tea.Cmd`; when nothing changed it only reloads the file
+   diff on screen (an already modified file can change without changing
+   the status) and leaves the other views alone.
+3. A changed `statusLoadedMsg` is applied: the file list keeps the
+   selection, the diff cache is cleared, and `requestDiff()` runs.
+4. `requestDiff()` serves the diff from `diffCache` if it can. Otherwise it
    schedules a 30 ms debounced `diffTickMsg`, and that triggers `loadDiff`.
    Results whose `seq` doesn't match are dropped, and the old diff stays
-   visible until the new one arrives, so there's no flicker.
-4. The branch view (`2`) loads branches every time it is shown and after
+   visible until the new one arrives, so there's no flicker; a diff of the
+   other kind (a file diff in the log, a commit in the files view) is
+   cleared instead, because it would be wrong rather than old. Every new
+   request cancels the running load's git process (`diffReq`), since key
+   repeat (~33 ms) outpaces the debounce. Commits (`commitReq`) and
+   histories (`logList.req`) are cancelled the same way.
+5. The branch view (`2`) loads branches every time it is shown and after
    every status refresh while it is visible (`branchSeq`). The selected
    branch's commits load like diffs: debounced, `commitSeq`-checked, cached
    per ref and cleared with each branch reload. The files view requests its
    diff again when it is shown.
-5. The log view (`3`) loads HEAD's history in pages of `logPage` commits
+6. The log view (`3`) loads HEAD's history in pages of `logPage` commits
    (`logSeq`); the next page loads when the cursor nears the end. The
    selected commit is shown in the diff pane through the same
    `requestDiff`/`diffCache` path as file diffs, keyed by
@@ -112,7 +127,7 @@ tools/preview/           drives the real Model through a script, writes docs/pre
    (`layoutGraph`) in the background along with the load; `View` only
    styles the cells of visible rows. `Model.history()` is the list of
    whichever of the two views is shown; each keeps its own `seq` and `limit`.
-6. Mutations go through `startOp`. Only one runs at a time (`busy`), so
+7. Mutations go through `startOp`. Only one runs at a time (`busy`), so
    commands never fight over `index.lock`. `opDoneMsg` always triggers a
    refresh, even after an error.
 
@@ -225,6 +240,19 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   them per keypress or frame; repos with huge untracked trees can have tens
   of thousands of rows. Every list view (files, branches, log, graph)
   embeds it and only adds rendering and selection restore.
+- **`View` assembles the frame line by line** (`bodyLines`, `fit`) from
+  parts already cut to their width. Lip Gloss's `Width`, `Height`,
+  `Padding` and `Join*` measure every cell of the frame again; they made a
+  frame 3× slower and allocated 520 KB. Lines are not padded on the right:
+  Bubble Tea's renderer erases the rest of each line itself.
+- **`resize` sizes every view, not only the shown one**, because switching
+  views doesn't resize. The graph is always the whole body, even when the
+  other views stack their panes on narrow terminals.
+- **Polling sleeps in `tea.Tick`**, so code that drives the model
+  synchronously (tests, `tools/preview`) must use `New(repo).WithoutPolling()`
+  and send `pollTickMsg` itself when it wants a poll.
+- **Messages are sanitized in `setMessage`.** Errors quote hook output,
+  which is often colored, and a raw escape code would reach the terminal.
 - **Footer hints are ordered by importance.** `Model.hints` drops them from
   the right when they don't fit but always keeps the last two (help and
   quit/back), so put new bindings where they rank, not at the end.
@@ -234,7 +262,9 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   read frames as text, drop a throwaway `_test.go` into `tools/preview`
   that runs `setupRepo` + `script` and prints `ansi.Strip(frame.ansi)`,
   then delete it. Keep the demo repo's dates so the branch view's order
-  (main oldest of the local branches) still matches the script.
+  (main oldest of the local branches) still matches the script. Commit
+  hashes and dates differ on every run, so a regenerated clip always
+  differs; only commit it when frames actually changed.
 
 ## Releasing
 
@@ -265,14 +295,17 @@ this range:
 | Path | Cost | Runs on |
 |---|---|---|
 | Parse a 50k-entry status | ~10 ms | background |
-| Keypress + full frame at 220×60 with 50k files | ~0.3 ms | UI goroutine |
+| Keypress + file list frame with 50k files | ~70 µs | UI goroutine |
+| Keypress + full frame at 220×60 with 50k files and a diff | ~0.2 ms | UI goroutine |
 | One frame of a 1 MiB diff | ~50 µs, independent of diff size | UI goroutine |
 | `splitDiff` of a 1 MiB diff | ~4 ms | background |
 | `layoutGraph` of 3,000 commits on 40 lanes | ~2 ms | background |
 | Keypress + frame of that graph | ~0.3 ms | UI goroutine |
 
 Anything proportional to repo or diff size belongs in a `tea.Cmd`, not in
-`Update` or `View`.
+`Update` or `View`. Background polling must stay under ~2% of a core
+(`pollCost`), and an unchanged poll must not reload anything but the
+visible file diff.
 
 ## Testing
 
@@ -292,6 +325,13 @@ Released as `v0.1.0`: milestone 1 (status, diff, stage/unstage, stage
 all, commit, help), discard (file and all, behind a y/n question),
 fullscreen diff (`enter`), branch view with checkout (`2`), log view (`3`),
 full-page graph of all branches (`4`).
+
+Released as `v0.2.0`: switching tabs with `←`/`→`.
+
+Unreleased (next: `v0.3.0`): background status polling, coalesced
+refreshes, cancelled stale loads, a 3× cheaper frame, and the fixes from
+the reliability review. Check `git ls-remote --tags origin` before
+picking a version; the roadmap can lag behind the tags.
 
 Each view gets its own model file in `internal/ui` and its own git
 functions + tests in `internal/git`. There is nothing planned beyond this;

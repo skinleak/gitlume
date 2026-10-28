@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/skinleak/gitlume/internal/git"
 	"github.com/skinleak/gitlume/internal/ui/theme"
 )
@@ -96,5 +98,26 @@ func BenchmarkGraphMoveAndView(b *testing.B) {
 			l.cursor = 0
 		}
 		_ = l.view(st, 100, true)
+	}
+}
+
+// BenchmarkFullFrame is one keypress and a full frame at 220×60 with 50k
+// changed files and a diff on screen: everything the UI goroutine does.
+func BenchmarkFullFrame(b *testing.B) {
+	m := New(&git.Repo{})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 220, Height: 60})
+	m = next.(Model)
+	m.files.setChanges(manyChanges(50_000))
+	line := "+\tsome added line of code with a fair amount of text in it"
+	m.diff.show(diffKey{path: "x"}, diffContent{lines: splitDiff(strings.Repeat(line+"\n", 2000))})
+	down := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")}
+	b.ReportAllocs()
+	for b.Loop() {
+		next, _ := m.Update(down)
+		m = next.(Model)
+		if m.files.cursor == len(m.files.items)-1 {
+			m.files.cursor = 0
+		}
+		_ = m.View()
 	}
 }

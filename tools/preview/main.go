@@ -60,12 +60,12 @@ func run(out string) error {
 	if err != nil {
 		return err
 	}
-	s := &session{m: ui.New(repo)}
+	s := &session{m: ui.New(repo).WithoutPolling()}
 	s.send(tea.WindowSizeMsg{Width: width, Height: height})
 	s.drain(s.m.Init())
 	script(s)
 
-	if err := os.WriteFile(out, []byte(renderSVG(s.frames, "gitlume: browsing changes, viewing a diff, staging, committing, the log, the graph and switching branches")), 0o644); err != nil {
+	if err := os.WriteFile(out, []byte(renderSVG(s.frames, "gitlume: browsing changes, viewing a diff, staging, committing, the log, the graph and switching branches", width)), 0o644); err != nil {
 		return err
 	}
 	fmt.Printf("wrote %s: %d frames\n", out, len(s.frames))

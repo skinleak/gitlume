@@ -9,11 +9,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/skinleak/gitlume/internal/git"
@@ -39,6 +39,13 @@ const (
 	// loads when the cursor gets within logPrefetch of the end.
 	logPage     = 300
 	logPrefetch = 50
+
+	// Background polling checks git status every pollMin, or pollCost
+	// times as long as the last status took, up to pollMax, so a big repo
+	// is polled less often and polling never costs more than ~2% of a core.
+	pollMin  = 2 * time.Second
+	pollMax  = time.Minute
+	pollCost = 50
 )
 
 // viewKind is the screen selected with the number keys.
@@ -77,14 +84,22 @@ type Model struct {
 	commit   commitPrompt
 	confirm  confirmPrompt
 
-	branch    git.Branch
+	status    git.Status // the last one applied, for polls to compare with
 	statusSeq int
+	loading   bool      // a status load is running; only one runs at a time
+	reload    bool      // a refresh was asked for while loading
+	statusAt  time.Time // when the last status finished loading
+	pollEvery time.Duration
+	polling   bool
+
 	diffSeq   int
+	diffReq   request
 	diffCache map[diffKey]diffContent
 	cacheSize int // bytes held in diffCache
 
 	branchSeq   int
 	commitSeq   int
+	commitReq   request
 	commitCache map[string][]git.Commit // by full ref
 
 	view     viewKind
@@ -113,12 +128,25 @@ func New(repo *git.Repo) Model {
 		commitCache: make(map[string][]git.Commit),
 		log:         logList{limit: logPage},
 		graph:       logList{graph: true, limit: logPage},
+		loading:     true, // by Init
+		pollEvery:   pollMin,
+		polling:     true,
 	}
 }
 
-// Init loads the initial status. Init cannot mutate the model, so it uses
-// the current sequence number instead of calling refresh.
-func (m Model) Init() tea.Cmd { return loadStatus(m.repo, m.statusSeq) }
+// WithoutPolling turns background status checks off, for tools and tests
+// that drive the model synchronously: a poll tick would make them sleep.
+func (m Model) WithoutPolling() Model {
+	m.polling = false
+	return m
+}
+
+// Init loads the initial status and starts polling. Init cannot mutate
+// the model, so New marks the load as running and Init uses the current
+// sequence number instead of calling refresh.
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(loadStatus(m.repo, m.statusSeq, false, m.status), m.nextPoll())
+}
 
 // Update routes messages to handlers.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -133,6 +161,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	case statusLoadedMsg:
 		return m, m.applyStatus(msg)
+	case pollTickMsg:
+		return m, m.poll(msg.at)
 	case diffTickMsg:
 		return m, m.fetchDiff(msg.seq)
 	case diffLoadedMsg:
@@ -319,10 +349,14 @@ func (m *Model) showView(v viewKind) tea.Cmd {
 	}
 	m.view, m.focus = v, focusFiles
 	m.diffSeq++ // a diff still loading belongs to the previous view
+	m.diffReq.stop()
 	switch v {
 	case viewBranches:
 		return m.reloadBranches()
 	case viewLog, viewGraph:
+		if !m.diff.key.isCommit() {
+			m.diff.clear() // a file diff must not show in the log
+		}
 		return m.reloadLog()
 	}
 	return m.requestDiff()
@@ -549,20 +583,74 @@ func (m *Model) startOp(pending, done string, op func(context.Context) error) te
 	return runOp(done, op)
 }
 
+// refresh reloads the status and everything shown from it. Only one
+// status load runs at a time: a refresh asked for meanwhile runs when it
+// finishes, so bursts of focus events or operations cost one extra load.
 func (m *Model) refresh() tea.Cmd {
+	if m.loading {
+		m.reload = true
+		return nil
+	}
+	return m.loadStatus(false)
+}
+
+func (m *Model) loadStatus(poll bool) tea.Cmd {
 	m.statusSeq++
-	return loadStatus(m.repo, m.statusSeq)
+	m.loading = true
+	return loadStatus(m.repo, m.statusSeq, poll, m.status)
+}
+
+// nextPoll schedules the next background check, or nil when polling is off.
+func (m Model) nextPoll() tea.Cmd {
+	if !m.polling {
+		return nil
+	}
+	return pollTick(m.pollEvery)
+}
+
+// poll checks the status in the background, which catches changes made
+// while the window has focus or in terminals without focus reporting. It
+// skips a tick while anything else is going on, or right after a refresh.
+func (m *Model) poll(now time.Time) tea.Cmd {
+	next := m.nextPoll()
+	if m.loading || m.busy || m.commit.active || m.confirm.active || now.Sub(m.statusAt) < m.pollEvery/2 {
+		return next
+	}
+	return tea.Batch(next, m.loadStatus(true))
 }
 
 func (m *Model) applyStatus(msg statusLoadedMsg) tea.Cmd {
 	if msg.seq != m.statusSeq {
 		return nil
 	}
+	m.loading = false
+	m.statusAt = msg.at
+	m.pollEvery = min(max(pollCost*msg.took, pollMin), pollMax)
+	cmd := m.showStatus(msg)
+	if m.reload {
+		// Compared with the status just shown, so it starts after it.
+		m.reload = false
+		return tea.Batch(cmd, m.loadStatus(false))
+	}
+	return cmd
+}
+
+// showStatus applies a loaded status. A poll that found nothing new
+// reloads only the diff on screen: a file that was already modified can
+// change without changing the status.
+func (m *Model) showStatus(msg statusLoadedMsg) tea.Cmd {
 	if msg.err != nil {
 		m.setMessage("", msg.err)
 		return nil
 	}
-	m.branch = msg.status.Branch
+	if msg.unchanged {
+		if m.view != viewFiles {
+			return nil
+		}
+		m.clearDiffCache()
+		return m.requestDiff()
+	}
+	m.status = msg.status
 	m.files.setChanges(allChanges(msg.status))
 	m.clearDiffCache()
 	if _, ok := m.diffTarget(); !ok && m.zoomed {
@@ -597,13 +685,14 @@ func (m *Model) reloadLog() tea.Cmd {
 	h := m.history()
 	h.seq++
 	if h.graph {
-		return loadGraph(m.repo, h.seq, h.limit, !m.branch.Unborn())
+		return loadGraph(h.req.start(), m.repo, h.seq, h.limit, !m.status.Branch.Unborn())
 	}
-	if m.branch.Unborn() {
+	if m.status.Branch.Unborn() {
+		h.req.stop()
 		h.set(nil, nil, false, h.now)
 		return m.requestDiff()
 	}
-	return loadLog(m.repo, h.seq, h.limit)
+	return loadLog(h.req.start(), m.repo, h.seq, h.limit)
 }
 
 func (m *Model) applyLog(msg logLoadedMsg) tea.Cmd {
@@ -614,6 +703,7 @@ func (m *Model) applyLog(msg logLoadedMsg) tea.Cmd {
 	if msg.seq != h.seq {
 		return nil
 	}
+	h.req.stop()
 	if msg.err != nil {
 		m.setMessage("", msg.err)
 		return nil
@@ -647,6 +737,7 @@ func (m *Model) applyBranches(msg branchesLoadedMsg) tea.Cmd {
 // like diffs.
 func (m *Model) requestCommits() tea.Cmd {
 	m.commitSeq++
+	m.commitReq.stop()
 	b, ok := m.branches.selected()
 	if !ok {
 		m.commits.clear()
@@ -664,13 +755,14 @@ func (m *Model) fetchCommits(seq int) tea.Cmd {
 	if seq != m.commitSeq || !ok {
 		return nil
 	}
-	return loadCommits(m.repo, seq, b.Ref())
+	return loadCommits(m.commitReq.start(), m.repo, seq, b.Ref())
 }
 
 func (m *Model) applyCommits(msg commitsLoadedMsg) {
 	if msg.seq != m.commitSeq {
 		return
 	}
+	m.commitReq.stop()
 	if msg.err != nil {
 		m.setMessage("", msg.err)
 		return
@@ -684,9 +776,12 @@ func (m *Model) applyCommits(msg commitsLoadedMsg) {
 
 // requestDiff shows the selected change's diff, from cache when possible.
 // Otherwise it schedules a debounced load; the current diff stays visible
-// until the new one arrives, so the panel never flickers.
+// until the new one arrives, so the panel never flickers. A diff of the
+// other kind (a file in the log, a commit in the files view) is cleared
+// instead: it would be wrong, not just old.
 func (m *Model) requestDiff() tea.Cmd {
 	m.diffSeq++
+	m.diffReq.stop()
 	k, ok := m.diffTarget()
 	if !ok {
 		m.diff.clear()
@@ -695,6 +790,9 @@ func (m *Model) requestDiff() tea.Cmd {
 	if cached, ok := m.diffCache[k]; ok {
 		m.diff.show(k, cached)
 		return nil
+	}
+	if m.diff.key.isCommit() != k.isCommit() {
+		m.diff.clear()
 	}
 	return diffTick(m.diffSeq)
 }
@@ -718,17 +816,18 @@ func (m *Model) fetchDiff(seq int) tea.Cmd {
 	if seq != m.diffSeq || !ok {
 		return nil
 	}
-	if k.commit != "" {
-		return loadShow(m.repo, seq, k.commit, m.layout().diffW)
+	if k.isCommit() {
+		return loadShow(m.diffReq.start(), m.repo, seq, k.commit, m.layout().diffW)
 	}
 	c, _ := m.files.selected()
-	return loadDiff(m.repo, seq, c)
+	return loadDiff(m.diffReq.start(), m.repo, seq, c)
 }
 
 func (m *Model) applyDiff(msg diffLoadedMsg) {
 	if msg.seq != m.diffSeq {
 		return
 	}
+	m.diffReq.stop()
 	if msg.err != nil {
 		m.setMessage("", msg.err)
 		return
@@ -746,13 +845,15 @@ func (m *Model) clearDiffCache() {
 	m.cacheSize = 0
 }
 
+// setMessage shows info or err in the footer. Errors can quote hook
+// output, which is often colored, so they are sanitized like file names.
 func (m *Model) setMessage(info string, err error) {
 	if err != nil {
-		m.message, m.isErr = err.Error(), true
+		m.message, m.isErr = sanitize(err.Error()), true
 		return
 	}
 	if info != "" {
-		m.message, m.isErr = info, false
+		m.message, m.isErr = sanitize(info), false
 	}
 }
 
@@ -765,34 +866,46 @@ type layout struct {
 
 func (m Model) innerWidth() int { return max(1, m.width-2*padX) }
 
+func (m Model) bodyHeight() int { return max(2, m.height-chromeHeight) }
+
+// layout is the current view's layout. The graph is the whole page at
+// every width; the other views split it into a list and a pane.
 func (m Model) layout() layout {
-	w := m.innerWidth()
-	bodyH := max(2, m.height-chromeHeight)
-	if m.zoomed {
-		return layout{diffW: w, diffH: bodyH}
+	switch {
+	case m.zoomed:
+		return layout{diffW: m.innerWidth(), diffH: m.bodyHeight()}
+	case m.view == viewGraph:
+		return layout{listW: m.innerWidth(), listH: m.bodyHeight()}
 	}
+	return m.paneLayout()
+}
+
+// paneLayout puts the list left of the pane, or above it when narrow.
+func (m Model) paneLayout() layout {
+	w, bodyH := m.innerWidth(), m.bodyHeight()
 	if w < stackBelow {
 		listH := max(1, bodyH*2/5)
 		return layout{listW: w, listH: listH, diffW: w, diffH: max(1, bodyH-listH-1), stacked: true}
-	}
-	if m.view == viewGraph {
-		return layout{listW: w, listH: bodyH} // the graph is the whole page
 	}
 	listW := clamp(w*35/100, minListWidth, maxListWidth)
 	return layout{listW: listW, listH: bodyH, diffW: w - listW - paneGap, diffH: bodyH}
 }
 
+// resize sizes every view, not only the one shown: switching views does
+// not resize.
 func (m *Model) resize() {
-	l := m.layout()
-	if !m.zoomed {
+	if m.zoomed {
+		m.diff.setHeight(m.bodyHeight())
+	} else {
 		// The lists keep their scroll position while hidden.
+		l := m.paneLayout()
 		m.files.setHeight(l.listH)
 		m.branches.setHeight(l.listH)
 		m.log.setHeight(l.listH)
-		m.graph.setHeight(l.listH)
 		m.commits.setHeight(l.diffH)
+		m.diff.setHeight(l.diffH)
 	}
-	m.diff.setHeight(l.diffH)
+	m.graph.setHeight(m.bodyHeight())
 	m.help.Width = m.innerWidth()
 	m.commit.input.Width = m.commitInputWidth()
 }
@@ -805,77 +918,137 @@ func (m Model) commitInputWidth() int {
 	return max(1, m.innerWidth()-ansi.StringWidth(commitLabel)-hint-paneGap-1)
 }
 
-// View renders the whole screen.
+// View renders the whole screen. It is assembled line by line from parts
+// that are already cut to their width: Lip Gloss's Width, Height and Join
+// measure every cell of the frame again and doubled the cost of a frame.
+// Lines are not padded on the right; the renderer clears the rest of each.
 func (m Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return ""
 	}
-	l := m.layout()
-	var body string
+	bodyH := m.bodyHeight()
+	var body []string
 	if m.showHelp {
-		body = m.helpOverlay(m.innerWidth(), m.height-chromeHeight)
+		body = lines(m.helpOverlay(m.innerWidth(), bodyH))
 	} else {
-		body = m.bodyView(l)
+		body = m.bodyLines(m.layout())
 	}
-	page := lipgloss.JoinVertical(lipgloss.Left,
-		"",
-		m.headerView(),
-		"",
-		lipgloss.NewStyle().Height(max(2, m.height-chromeHeight)).MaxHeight(max(2, m.height-chromeHeight)).Render(body),
-		"",
-		m.footerView(),
-	)
-	// The clamp only matters for windows too small for the chrome itself.
-	return lipgloss.NewStyle().Padding(0, padX).MaxWidth(m.width).MaxHeight(m.height).Render(page)
+	page := make([]string, 0, bodyH+chromeHeight)
+	page = append(page, "", m.headerView(), "")
+	for i := range bodyH {
+		if i < len(body) {
+			page = append(page, body[i])
+		} else {
+			page = append(page, "")
+		}
+	}
+	page = append(page, "", m.footerView())
+	page = page[:min(len(page), m.height)] // windows too small for the chrome
+
+	margin := strings.Repeat(" ", padX)
+	tiny := padX+m.innerWidth() > m.width
+	var b strings.Builder
+	for i, l := range page {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		if l == "" {
+			continue
+		}
+		l = margin + l
+		if tiny {
+			l = ansi.Truncate(l, m.width, "")
+		}
+		b.WriteString(l)
+	}
+	return b.String()
 }
 
-func (m Model) bodyView(l layout) string {
+// bodyLines renders the body: the list and its pane side by side, or
+// stacked when narrow. Pane lines are already cut to the pane width.
+func (m Model) bodyLines(l layout) []string {
 	if m.zoomed {
-		return m.diff.view(m.styles, l.diffW)
+		return lines(m.diff.view(m.styles, l.diffW))
 	}
-	var list, diff string
+	var list, pane string
 	switch m.view {
 	case viewBranches:
 		list = m.branches.view(m.styles, l.listW)
-		diff = m.commits.view(m.styles, l.diffW)
+		pane = m.commits.view(m.styles, l.diffW)
 	case viewLog:
 		list = m.log.view(m.styles, l.listW, m.focus == focusFiles)
-		diff = m.diff.view(m.styles, l.diffW)
+		pane = m.diff.view(m.styles, l.diffW)
 	case viewGraph:
-		return m.graph.view(m.styles, l.listW, true)
+		return lines(m.graph.view(m.styles, l.listW, true))
 	default:
 		list = m.files.view(m.styles, l.listW, m.focus == focusFiles)
-		diff = m.diff.view(m.styles, l.diffW)
+		pane = m.diff.view(m.styles, l.diffW)
 	}
-	list = lipgloss.NewStyle().Width(l.listW).Render(list)
+	left, right := lines(list), lines(pane)
 	if l.stacked {
-		list = lipgloss.NewStyle().Height(l.listH).Render(list)
-		return lipgloss.JoinVertical(lipgloss.Left, list, "", diff)
+		out := make([]string, l.listH, l.listH+1+len(right))
+		for i := range min(len(left), l.listH) {
+			out[i] = fit(left[i], l.listW, false)
+		}
+		return append(append(out, ""), right...)
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, list, strings.Repeat(" ", paneGap), diff)
+	gap := strings.Repeat(" ", paneGap)
+	out := make([]string, max(len(left), len(right)))
+	for i := range out {
+		var a string
+		if i < len(left) {
+			a = left[i]
+		}
+		if i >= len(right) || right[i] == "" {
+			out[i] = fit(a, l.listW, false)
+			continue
+		}
+		out[i] = fit(a, l.listW, true) + gap + right[i]
+	}
+	return out
+}
+
+// lines splits rendered text into lines; empty text has none.
+func lines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\n")
+}
+
+// fit cuts s to width cells and, when pad is set, fills it up to width.
+func fit(s string, width int, pad bool) string {
+	w := ansi.StringWidth(s)
+	if w > width {
+		return ansi.Truncate(s, width, "")
+	}
+	if pad && w < width {
+		return s + strings.Repeat(" ", width-w)
+	}
+	return s
 }
 
 func (m Model) headerView() string {
 	st := m.styles
-	repo := st.Muted.Render(filepath.Base(m.repo.Root()))
+	repo := st.Muted.Render(sanitize(filepath.Base(m.repo.Root())))
 	var branch string
-	switch b := m.branch; {
+	switch b := m.status.Branch; {
 	case b.Detached() && len(b.OID) >= 7:
 		branch = st.Branch.Render("detached") + " " + st.Muted.Render(b.OID[:7])
 	case b.Detached():
 		branch = st.Branch.Render("detached")
 	default:
-		branch = st.Branch.Render(b.Head)
+		branch = st.Branch.Render(sanitize(b.Head))
 	}
 	parts := []string{repo, branch}
-	if m.branch.Unborn() && !m.branch.Detached() {
+	if m.status.Branch.Unborn() && !m.status.Branch.Detached() {
 		parts = append(parts, st.Subtle.Render("no commits yet"))
 	}
-	if m.branch.Ahead > 0 {
-		parts = append(parts, st.Ahead.Render("↑"+strconv.Itoa(m.branch.Ahead)))
+	if m.status.Branch.Ahead > 0 {
+		parts = append(parts, st.Ahead.Render("↑"+strconv.Itoa(m.status.Branch.Ahead)))
 	}
-	if m.branch.Behind > 0 {
-		parts = append(parts, st.Behind.Render("↓"+strconv.Itoa(m.branch.Behind)))
+	if m.status.Branch.Behind > 0 {
+		parts = append(parts, st.Behind.Render("↓"+strconv.Itoa(m.status.Branch.Behind)))
 	}
 	if m.zoomed {
 		if c, ok := m.files.selected(); ok && m.view == viewFiles {

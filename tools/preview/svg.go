@@ -153,12 +153,13 @@ func renderLine(line string) string {
 	return out
 }
 
-// renderSVG builds an animated SVG from frames. Identical rows are defined
-// once and reused. Colors and fonts are presentation attributes, so
+// renderSVG builds an animated SVG from frames of a terminal cols cells
+// wide; gitlume does not pad its lines to the width. Identical rows are
+// defined once and reused. Colors and fonts are presentation attributes, so
 // renderers without CSS still draw text, and the first frame is visible
 // without animation, so viewers that don't animate show a still.
-func renderSVG(frames []frame, label string) string {
-	rows, cols := 0, 0
+func renderSVG(frames []frame, label string, cols int) string {
+	rows := 0
 	var total float64
 	for _, f := range frames {
 		lines := strings.Split(f.ansi, "\n")

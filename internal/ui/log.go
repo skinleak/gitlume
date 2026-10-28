@@ -21,7 +21,8 @@ type logList struct {
 	graph  bool
 	lanes  [][]graphCell // one row per commit, graph only
 	seq    int
-	limit  int // commits requested from git; grows by logPage
+	req    request // the running load
+	limit  int     // commits requested from git; grows by logPage
 	loaded bool
 	more   bool
 	now    time.Time // when the list was loaded; ages are relative to it
