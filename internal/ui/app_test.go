@@ -47,7 +47,7 @@ func newTestModel(t *testing.T) (Model, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := New(repo)
+	m := New(repo).WithoutPolling()
 	m = pump(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 	m = drain(t, m, m.Init())
 	return m, dir
@@ -480,8 +480,8 @@ func TestBranchView(t *testing.T) {
 
 	m = selectBranch(t, m, "feature")
 	m = pump(t, m, keyPress("enter"))
-	if m.branch.Head != "feature" || !strings.Contains(plainView(m), "Switched to feature") {
-		t.Fatalf("head = %q after checkout:\n%s", m.branch.Head, plainView(m))
+	if m.status.Branch.Head != "feature" || !strings.Contains(plainView(m), "Switched to feature") {
+		t.Fatalf("head = %q after checkout:\n%s", m.status.Branch.Head, plainView(m))
 	}
 	if b, _ := m.branches.selected(); b.Name != "feature" || !b.Current {
 		t.Errorf("selection after checkout = %+v, want current feature", b)
@@ -506,7 +506,7 @@ func TestCheckoutRefusalShown(t *testing.T) {
 	m = pump(t, m, keyPress("2"))
 	m = selectBranch(t, m, "other")
 	m = pump(t, m, keyPress("enter"))
-	if !m.isErr || !strings.Contains(m.message, "would be overwritten") || m.branch.Head != "main" {
+	if !m.isErr || !strings.Contains(m.message, "would be overwritten") || m.status.Branch.Head != "main" {
 		t.Errorf("want git's refusal in the status line, head main:\n%s", plainView(m))
 	}
 }
@@ -735,5 +735,142 @@ func TestAge(t *testing.T) {
 		if got := age(tt.d); got != tt.want {
 			t.Errorf("age(%v) = %q, want %q", tt.d, got, tt.want)
 		}
+	}
+}
+
+func TestGraphFillsNarrowWindow(t *testing.T) {
+	m, dir := newTestModel(t)
+	for i := range 30 {
+		gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "c"+strconv.Itoa(i))
+	}
+	m = pump(t, m, tea.WindowSizeMsg{Width: 60, Height: 20}) // stacked panes
+	m = pump(t, m, keyPress("r"))
+	m = pump(t, m, keyPress("4"))
+	// The graph is the whole page at every width: header, then commits.
+	if n := strings.Count(plainView(m), "●"); n != 20-chromeHeight-1 {
+		t.Errorf("graph shows %d commits in a 20-line window, want %d:\n%s", n, 20-chromeHeight-1, plainView(m))
+	}
+}
+
+func TestTabSwitchNeverShowsOtherViewsDiff(t *testing.T) {
+	m, dir := newTestModel(t)
+	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "second")
+	m = pump(t, m, keyPress("r"))
+	// Before the log has loaded, the file diff must already be gone.
+	next, cmd := m.Update(keyPress("3"))
+	m = next.(Model)
+	if v := plainView(m); strings.Contains(v, "+two") {
+		t.Errorf("the files view's diff shows in the log:\n%s", v)
+	}
+	m = drain(t, m, cmd)
+	m.clearDiffCache()
+	next, _ = m.Update(keyPress("1"))
+	if v := plainView(next.(Model)); strings.Contains(v, "Author:") {
+		t.Errorf("the log's commit shows in the files view:\n%s", v)
+	}
+}
+
+func TestHookOutputSanitizedInStatusLine(t *testing.T) {
+	m, dir := newTestModel(t)
+	hook := filepath.Join(dir, ".git", "hooks", "pre-commit")
+	write(t, filepath.Join(dir, ".git", "hooks"), "pre-commit", "#!/bin/sh\nprintf '\\033[31merror: lint failed\\033[0m\\n' >&2\nexit 1\n")
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m = pump(t, m, keyPress("a"))
+	m = pump(t, m, keyPress("c"))
+	m = pump(t, m, keyPress("x"))
+	m = pump(t, m, keyPress("enter"))
+	if !m.isErr || !strings.Contains(m.message, "lint failed") {
+		t.Fatalf("hook error not shown: %q", m.message)
+	}
+	if strings.Contains(m.View(), "\x1b[31merror") {
+		t.Error("raw escape codes from hook output reached the terminal")
+	}
+}
+
+func TestHeaderSanitizesRepoName(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	dir := filepath.Join(t.TempDir(), "evil\x1b[2Jrepo")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, dir, "init", "-q", "-b", "main")
+	repo, err := git.Open(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(repo).WithoutPolling()
+	m = pump(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = drain(t, m, m.Init())
+	if v := m.View(); strings.Contains(v, "\x1b[2J") || !strings.Contains(ansi.Strip(v), "evil?[2Jrepo") {
+		t.Errorf("repo name not sanitized in the header:\n%q", v)
+	}
+}
+
+func TestRefreshRunsOneStatusAtATime(t *testing.T) {
+	m, _ := newTestModel(t)
+	first := m.refresh()
+	if first == nil || m.refresh() != nil || !m.reload {
+		t.Fatal("a second refresh while loading should wait for the first")
+	}
+	next, then := m.Update(first())
+	m = next.(Model)
+	if then == nil || !m.loading || m.reload {
+		t.Fatal("the waiting refresh did not start after the first finished")
+	}
+	if m = drain(t, m, then); m.loading {
+		t.Error("still loading after both refreshes finished")
+	}
+}
+
+func TestPollUpdatesDiffOfModifiedFile(t *testing.T) {
+	m, dir := newTestModel(t)
+	// a.txt stays modified, so the status does not change; its diff does.
+	write(t, dir, "a.txt", "one\ntwo\nthree\n")
+	m = pump(t, m, pollTickMsg{at: time.Now().Add(time.Hour)})
+	if v := plainView(m); !strings.Contains(v, "+three") {
+		t.Errorf("poll did not pick up the edit:\n%s", v)
+	}
+
+	// An unchanged status reloads nothing else.
+	m = pump(t, m, keyPress("3"))
+	seq := m.log.seq
+	m = pump(t, m, pollTickMsg{at: time.Now().Add(2 * time.Hour)})
+	if m.log.seq != seq {
+		t.Error("an unchanged poll reloaded the log")
+	}
+
+	// A change made elsewhere is picked up in any view.
+	gitRun(t, dir, "commit", "-q", "-am", "elsewhere")
+	m = pump(t, m, pollTickMsg{at: time.Now().Add(3 * time.Hour)})
+	if v := plainView(m); !strings.Contains(v, "elsewhere") {
+		t.Errorf("poll did not show the new commit:\n%s", v)
+	}
+
+	// No poll while a question is open: its answer refreshes anyway.
+	m = pump(t, m, keyPress("1"))
+	write(t, dir, "new.txt", "x\n")
+	m = pump(t, m, keyPress("r"))
+	m = pump(t, m, keyPress("D"))
+	if !m.confirm.active {
+		t.Fatal("no question open")
+	}
+	if cmd := m.poll(time.Now().Add(4 * time.Hour)); cmd != nil || m.loading {
+		t.Error("polled while a question was open")
+	}
+}
+
+func TestMovingCancelsRunningDiff(t *testing.T) {
+	m, _ := newTestModel(t)
+	ctx := m.diffReq.start() // a diff load in flight
+	// At once, not only when the next load starts after the debounce.
+	m.Update(keyPress("j"))
+	if ctx.Err() == nil {
+		t.Error("moving on did not stop the previous diff's git process")
 	}
 }

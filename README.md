@@ -39,8 +39,9 @@ Run `gitlume` anywhere inside a git work tree.
 | `?`              | Show all keybindings                  |
 | `q`              | Quit                                  |
 
-Status refreshes after every action and whenever the terminal window
-regains focus.
+Status refreshes after every action, whenever the terminal window regains
+focus, and in the background every few seconds (less often in big
+repositories), so it stays current even in a split or on a second screen.
 
 ## Design
 
@@ -48,13 +49,15 @@ regains focus.
   parses its stable porcelain formats. Your config, hooks, and credentials
   behave exactly as they do on the command line.
 - **Never blocks.** Every git command runs in the background. Results that
-  arrive out of order are dropped, so fast navigation never shows the
-  wrong diff.
+  arrive out of order are dropped and their git processes stopped, so fast
+  navigation never shows the wrong diff or piles up work.
 - **Never fights you for the lock.** Background refreshes use
   `GIT_OPTIONAL_LOCKS=0`, and write operations run one at a time.
 - **Stays fast in big repos.** Diffs are capped at 1 MiB and only the
-  visible lines are rendered. A keypress takes about 0.3 ms even with
-  50,000 changed files.
+  visible lines are rendered. A keypress and a full frame take about
+  0.2 ms even with 50,000 changed files. Background checks pace themselves
+  by how long `git status` takes, so they never cost more than ~2% of a
+  core.
 - **Safe with odd file names and contents.** Paths are passed literally (a
   file named `*.txt` is just that file), and control characters can't reach
   your terminal.

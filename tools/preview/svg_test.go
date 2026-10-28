@@ -39,7 +39,7 @@ func TestRenderLinePositionsRuns(t *testing.T) {
 }
 
 func TestRenderSVGFirstFrameVisible(t *testing.T) {
-	svg := renderSVG([]frame{{"one", 1}, {"two", 1}}, "x")
+	svg := renderSVG([]frame{{"one", 1}, {"two", 1}}, "x", 10)
 	if !strings.Contains(svg, `<g id="f0" class="f"><use`) || !strings.Contains(svg, `<g id="f1" class="f" opacity="0">`) {
 		t.Errorf("frame visibility wrong:\n%s", svg)
 	}
