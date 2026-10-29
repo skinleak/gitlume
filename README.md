@@ -39,7 +39,7 @@ Run `gitlume` anywhere inside a git work tree.
 | `b`              | Open the branch list, from files or the log (`esc` to go back) |
 | `enter` (branches) | Check out the selected branch and go back (a remote branch gets a local tracking branch) |
 | `r`              | Refresh                               |
-| `?`              | Show all keybindings                  |
+| `?`              | Show all keybindings (`j`/`k` scroll them in a small window) |
 | `q`              | Quit                                  |
 
 Push and pull are deliberately safe: push never forces, so a remote with
