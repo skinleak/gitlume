@@ -7,7 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/skinleak/gitlume/internal/ui/theme"
+	"github.com/skinleak/qitlog/internal/ui/theme"
 )
 
 func newHelp(st theme.Styles) help.Model {

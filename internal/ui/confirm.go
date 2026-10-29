@@ -3,7 +3,7 @@ package ui
 import (
 	"context"
 
-	"github.com/skinleak/gitlume/internal/ui/theme"
+	"github.com/skinleak/qitlog/internal/ui/theme"
 )
 
 // confirmPrompt is a yes/no question shown in the footer. The operation it

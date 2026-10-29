@@ -7,7 +7,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/skinleak/gitlume/internal/ui/theme"
+	"github.com/skinleak/qitlog/internal/ui/theme"
 )
 
 // Captured from `git diff --cached -M --src-prefix=a/ --dst-prefix=b/` in a

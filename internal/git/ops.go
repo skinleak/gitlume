@@ -40,7 +40,7 @@ func (r *Repo) Commit(ctx context.Context, message string) error {
 }
 
 // ErrNestedRepo is returned by Discard for an untracked nested repository,
-// which is never deleted from gitlume.
+// which is never deleted from qitlog.
 var ErrNestedRepo = errors.New("refusing to delete a nested repository")
 
 // Discard throws away every uncommitted change to c, staged and unstaged.
@@ -91,7 +91,7 @@ func (r *Repo) unborn(ctx context.Context) (bool, error) {
 }
 
 // ErrAmendPushed is returned when the last commit is already on the
-// branch's upstream: amending it would need a force push, which gitlume
+// branch's upstream: amending it would need a force push, which qitlog
 // never does.
 var ErrAmendPushed = errors.New("the last commit is already pushed; amending it would need a force push")
 

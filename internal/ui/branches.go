@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/skinleak/gitlume/internal/git"
-	"github.com/skinleak/gitlume/internal/ui/theme"
+	"github.com/skinleak/qitlog/internal/git"
+	"github.com/skinleak/qitlog/internal/ui/theme"
 )
 
 // branchList shows local branches, then remote-tracking ones, in the

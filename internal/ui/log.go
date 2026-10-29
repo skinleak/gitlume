@@ -6,8 +6,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/skinleak/gitlume/internal/git"
-	"github.com/skinleak/gitlume/internal/ui/theme"
+	"github.com/skinleak/qitlog/internal/git"
+	"github.com/skinleak/qitlog/internal/ui/theme"
 )
 
 // logList is the history of every branch, newest first, drawn as a graph.

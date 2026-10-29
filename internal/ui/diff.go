@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/skinleak/gitlume/internal/git"
-	"github.com/skinleak/gitlume/internal/ui/theme"
+	"github.com/skinleak/qitlog/internal/git"
+	"github.com/skinleak/qitlog/internal/ui/theme"
 )
 
 // diffKey identifies what the diff pane shows: the diff of one change, or
@@ -110,7 +110,7 @@ func tidyPatch(lines []string, truncated bool) ([]string, []fileHead) {
 		case strings.HasPrefix(l, "index "), strings.HasPrefix(l, "old mode"),
 			strings.HasPrefix(l, "similarity index"), strings.HasPrefix(l, "dissimilarity index"):
 		default:
-			out = append(out, l) // a header line gitlume doesn't know: keep it
+			out = append(out, l) // a header line qitlog doesn't know: keep it
 		}
 	}
 	if truncated && len(heads) > 0 {

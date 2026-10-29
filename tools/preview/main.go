@@ -1,5 +1,5 @@
 // Command preview renders docs/preview.svg, the animated clip in the README.
-// It builds a demo repository in a temp directory, drives the real gitlume
+// It builds a demo repository in a temp directory, drives the real qitlog
 // model through a scripted session and records every frame, so the clip
 // always shows what the current code renders.
 //
@@ -21,8 +21,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
-	"github.com/skinleak/gitlume/internal/git"
-	"github.com/skinleak/gitlume/internal/ui"
+	"github.com/skinleak/qitlog/internal/git"
+	"github.com/skinleak/qitlog/internal/ui"
 )
 
 const (
@@ -46,7 +46,7 @@ func run(out string) error {
 	os.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
 	os.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 
-	base, err := os.MkdirTemp("", "gitlume-preview-")
+	base, err := os.MkdirTemp("", "qitlog-preview-")
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func run(out string) error {
 	s.drain(s.m.Init())
 	script(s)
 
-	if err := os.WriteFile(out, []byte(renderSVG(s.frames, "gitlume: browsing changes, viewing a diff, staging, committing, pushing, the log with its graph of all branches and switching branches", width)), 0o644); err != nil {
+	if err := os.WriteFile(out, []byte(renderSVG(s.frames, "qitlog: browsing changes, viewing a diff, staging, committing, pushing, the log with its graph of all branches and switching branches", width)), 0o644); err != nil {
 		return err
 	}
 	fmt.Printf("wrote %s: %d frames\n", out, len(s.frames))

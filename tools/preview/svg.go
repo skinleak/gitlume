@@ -14,7 +14,7 @@ type frame struct {
 	dur  float64 // seconds
 }
 
-// The clip needs concrete colors for gitlume's ANSI indices: a calm dark
+// The clip needs concrete colors for qitlog's ANSI indices: a calm dark
 // terminal theme.
 const (
 	bgColor = "#1a1b26"
@@ -51,7 +51,7 @@ type cell struct {
 }
 
 // parseCells splits one line of ANSI text into styled cells. Only the SGR
-// codes gitlume emits are interpreted; others are ignored.
+// codes qitlog emits are interpreted; others are ignored.
 func parseCells(line string) []cell {
 	var cells []cell
 	var st style
@@ -154,7 +154,7 @@ func renderLine(line string) string {
 }
 
 // renderSVG builds an animated SVG from frames of a terminal cols cells
-// wide; gitlume does not pad its lines to the width. Identical rows are
+// wide; qitlog does not pad its lines to the width. Identical rows are
 // defined once and reused. Colors and fonts are presentation attributes, so
 // renderers without CSS still draw text, and the first frame is visible
 // without animation, so viewers that don't animate show a still.

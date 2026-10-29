@@ -4,8 +4,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/skinleak/gitlume/internal/git"
-	"github.com/skinleak/gitlume/internal/ui/theme"
+	"github.com/skinleak/qitlog/internal/git"
+	"github.com/skinleak/qitlog/internal/ui/theme"
 )
 
 // graphCell is one terminal cell of the commit graph. Even cells are
