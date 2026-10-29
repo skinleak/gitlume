@@ -113,7 +113,7 @@ func TestLogColumnsAlign(t *testing.T) {
 	cs := commits("a:o", "b:o", "o:")
 	var l logList
 	l.setHeight(10)
-	l.set(cs, layoutGraph(cs), false)
+	l.set(cs, layoutGraph(cs), false, "")
 	// The graphs "●", "│ ●" and "●─╯" are 1, 3 and 3 cells wide; every
 	// hash starts after the widest: "› " + 3 cells + "  ".
 	lines := strings.Split(ansi.Strip(l.view(st, 80, true)), "\n")[1:]
