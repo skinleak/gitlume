@@ -20,6 +20,7 @@ type KeyMap struct {
 	Open       key.Binding
 	Back       key.Binding
 	Checkout   key.Binding
+	NewBranch  key.Binding
 	Files      key.Binding
 	Branches   key.Binding
 	Log        key.Binding
@@ -32,7 +33,7 @@ type KeyMap struct {
 	Quit       key.Binding
 }
 
-// PromptKeyMap holds bindings active while the commit prompt is open.
+// PromptKeyMap holds bindings active while a prompt is open.
 type PromptKeyMap struct {
 	Confirm key.Binding
 	Cancel  key.Binding
@@ -99,6 +100,10 @@ func Default() KeyMap {
 			key.WithKeys("enter"),
 			key.WithHelp("enter", "checkout"),
 		),
+		NewBranch: key.NewBinding(
+			key.WithKeys("n"),
+			key.WithHelp("n", "new branch"),
+		),
 		Files: key.NewBinding(
 			key.WithKeys("1"),
 			key.WithHelp("1", "files"),
@@ -156,6 +161,20 @@ func DefaultPrompt() PromptKeyMap {
 	}
 }
 
+// DefaultBranchPrompt returns the new branch prompt bindings.
+func DefaultBranchPrompt() PromptKeyMap {
+	return PromptKeyMap{
+		Confirm: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "create"),
+		),
+		Cancel: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "cancel"),
+		),
+	}
+}
+
 // DefaultConfirm returns the yes/no question bindings. enter is not a
 // yes on purpose: these questions guard destructive operations.
 func DefaultConfirm() ConfirmKeyMap {
@@ -181,7 +200,7 @@ func (k KeyMap) ShortHelp() []key.Binding {
 
 // BranchHelp is the footer hint while the branch list is open.
 func (k KeyMap) BranchHelp() []key.Binding {
-	return []key.Binding{k.Checkout, k.Refresh, k.Back, k.Help}
+	return []key.Binding{k.Checkout, k.NewBranch, k.Refresh, k.Back, k.Help}
 }
 
 // LogHelp is the footer hint in the log view.
@@ -199,11 +218,11 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Focus, k.ScrollUp, k.ScrollDown, k.Open, k.Back},
 		{k.Toggle, k.StageAll, k.Discard, k.DiscardAll, k.Commit, k.Pull, k.Push, k.Refresh},
-		{k.Files, k.Log, k.PrevView, k.NextView, k.Branches, k.Checkout, k.Help, k.Quit},
+		{k.Files, k.Log, k.PrevView, k.NextView, k.Branches, k.Checkout, k.NewBranch, k.Help, k.Quit},
 	}
 }
 
-// ShortHelp is the hint shown under the commit prompt.
+// ShortHelp is the hint shown next to a prompt.
 func (k PromptKeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{k.Confirm, k.Cancel}
 }

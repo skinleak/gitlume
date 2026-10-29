@@ -69,7 +69,8 @@ internal/git/            UI-free git wrapper; everything here is unit-testable
   status.go              porcelain v2 -z parser; Status.Changes(group)
   diff.go                per-change diff, capped at MaxDiffBytes
   ops.go                 Stage, Unstage, StageAll, Commit, Discard, DiscardAll
-  branches.go            for-each-ref and log parsers; Branches, Log, Graph, Show, Checkout
+  branches.go            for-each-ref and log parsers; Branches, Log, Graph, Show, Checkout,
+                         CreateBranch
   sync.go                Push (porcelain parser, rejections) and Pull (fast-forward only)
 internal/ui/
   app.go                 root Model: key routing, layout, header/footer, async orchestration
@@ -82,7 +83,7 @@ internal/ui/
   branches.go            branchList + commitsView: the branch list (`b`) over files or log
   log.go                 logList (the log `2`: all branches as a graph) and commit-header styling
   graph.go               lane layout and rendering for the log's graph
-  commit.go              commit prompt (textinput)
+  prompt.go              one-line footer prompt (textinput): commit message, new branch name
   confirm.go             y/n question guarding destructive operations
   help.go                help overlay generated from keys.KeyMap; reflows and scrolls
   theme/                 the ONLY place colors and lipgloss styles are defined
@@ -222,6 +223,13 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   branch, so `DiscardAll` needs no special case.
 - **Branch ages are relative to `branchList.now`**, captured when the list
   loads, so `View` never calls `time.Now()` and frames are deterministic.
+- **New branches never track their start point** (`switch --no-track -c`).
+  A branch made from `origin/main` would otherwise track it, and push
+  refuses an upstream with another name, so the first push sets the
+  upstream instead. `n` starts from the selected branch, which is the
+  current one when the list opens, and turns spaces into dashes; git
+  explains any other invalid name. Prompts are one `prompt` type with
+  their own keys; `activePrompt` routes input to the open one.
 - **Remote checkout uses `git switch --track <remote>/<name>`.** When a local
   branch of that name already exists, the UI switches to it instead
   (`branchList.localFor`), because git would refuse to create it again.
@@ -403,14 +411,20 @@ don't fit side by side go below each other, and it scrolls with j/k.
 Released as `v0.5.1`: info messages fade after 3 seconds so the
 key hints come back; errors still stay until the next key.
 
-Unreleased (next: `v0.5.2`): after a checkout the log selects the new
-HEAD, and follows HEAD when it was selected. "Nothing to push" says when
-the changes just aren't committed yet.
+Released as `v0.5.2`: after a checkout the log selects the new HEAD, and
+follows HEAD when it was selected. "Nothing to push" says when the
+changes just aren't committed yet.
+
+Unreleased (next: `v0.6.0`): `n` in the branch list creates a branch
+from the selected one and switches to it.
+
+Planned before `v1.0.0`, agreed with the owner: amend (`A`) and staging
+single hunks from the diff pane. After that, fixes and polish only.
 
 Check `git ls-remote --tags origin` before picking a version; the roadmap
 can lag behind the tags.
 
 Each view gets its own model file in `internal/ui` and its own git
-functions + tests in `internal/git`. There is nothing planned beyond this;
-new features come from the owner. The views are deliberately few, so think
+functions + tests in `internal/git`. Nothing is planned beyond the list
+above; new features come from the owner. The views are deliberately few, so think
 twice before suggesting a third tab.

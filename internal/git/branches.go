@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -203,6 +204,26 @@ func (r *Repo) Checkout(ctx context.Context, b BranchRef) error {
 		return r.write(ctx, invocation{args: []string{"switch", "-q", "--track", b.Name}})
 	}
 	return r.write(ctx, invocation{args: []string{"switch", "-q", b.Name}})
+}
+
+// ErrEmptyBranchName is returned by CreateBranch for a blank name.
+var ErrEmptyBranchName = errors.New("branch name is empty")
+
+// CreateBranch creates branch name at from, a full ref name, or at HEAD
+// when from is empty, and switches to it. Work tree changes come along;
+// git refuses, and the error says why, when the switch would overwrite
+// them. The new branch never tracks from, even a remote one: its upstream
+// would have a different name, which push refuses, so the first push sets
+// the upstream instead. git rejects invalid names and existing branches.
+func (r *Repo) CreateBranch(ctx context.Context, name, from string) error {
+	if name == "" {
+		return ErrEmptyBranchName
+	}
+	args := []string{"switch", "-q", "--no-track", "-c", name}
+	if from != "" {
+		args = append(args, from)
+	}
+	return r.write(ctx, invocation{args: args})
 }
 
 // Show returns a commit's header, message, diffstat and patch, as
