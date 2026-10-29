@@ -263,7 +263,8 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   host key, underneath the UI and racing Bubble Tea for keystrokes.
   Without a terminal they fail and the error reaches the footer. Cancel
   kills the whole process group, so ssh dies with git. The test compares
-  session ids, so it means the same with or without a tty.
+  process groups (macOS `ps` has no session ids), so it means the same
+  with or without a tty.
 - **Push never forces and pull only fast-forwards.** Pull is
   `pull --ff-only --no-rebase`, so `pull.rebase` can't turn it into a
   rebase on any git version. Push uses `--porcelain` to tell up to date
