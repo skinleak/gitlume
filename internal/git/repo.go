@@ -71,3 +71,12 @@ func (r *Repo) write(ctx context.Context, inv invocation) error {
 	_, err := run(ctx, r.root, inv)
 	return err
 }
+
+// network runs a command that talks to a remote. It gets the write timeout,
+// since a push runs pre-push hooks, and no terminal to prompt on.
+func (r *Repo) network(ctx context.Context, inv invocation) (result, error) {
+	ctx, cancel := context.WithTimeout(ctx, writeTimeout)
+	defer cancel()
+	inv.detach = true
+	return run(ctx, r.root, inv)
+}

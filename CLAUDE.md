@@ -62,11 +62,14 @@ go-git.
 cmd/gitlume/main.go      Open repo → warm terminal background query → run tea.Program
 internal/git/            UI-free git wrapper; everything here is unit-testable
   runner.go              the only place that executes git (fixed env, limits, *Error)
-  repo.go                Open/ErrNotRepo, read (10s) and write (5m) timeouts
+  runner_unix.go         detach: network commands run in their own session (no tty)
+  runner_other.go        detach is a no-op where there is no controlling terminal
+  repo.go                Open/ErrNotRepo, read (10s), write and network (5m) timeouts
   status.go              porcelain v2 -z parser; Status.Changes(group)
   diff.go                per-change diff, capped at MaxDiffBytes
   ops.go                 Stage, Unstage, StageAll, Commit, Discard, DiscardAll
   branches.go            for-each-ref and log parsers; Branches, Log, Graph, Show, Checkout
+  sync.go                Push (porcelain parser, rejections) and Pull (fast-forward only)
 internal/ui/
   app.go                 root Model: key routing, layout, header/footer, async orchestration
   msgs.go                tea.Msg types + tea.Cmd constructors wrapping internal/git;
@@ -127,9 +130,11 @@ tools/preview/           drives the real Model through a script, writes docs/pre
    diff pane through the same `requestDiff`/`diffCache` path as file
    diffs, keyed by `diffKey{commit: hash}`; `diffTarget()` decides what
    the pane shows. `Model.history()` is the log's list while it is shown.
-7. Mutations go through `startOp`. Only one runs at a time (`busy`), so
-   commands never fight over `index.lock`. `opDoneMsg` always triggers a
-   refresh, even after an error.
+7. Mutations go through `start` (`startOp` for plain ones, `runSync` for
+   push and pull). Only one runs at a time (`busy`), so commands never
+   fight over `index.lock`. Its `pending` text ("Pushing…") stays in the
+   footer until it ends; messages clear on the next key, which would hide
+   a slow push. `opDoneMsg` always triggers a refresh, even after an error.
 
 ## Rules
 
@@ -247,6 +252,21 @@ tools/preview/           drives the real Model through a script, writes docs/pre
 - **Log rows line up after the widest graph on screen** (`graphW`), capped
   at half the row so one very wide merge can't push every subject off.
   Nodes are `◉` HEAD, `○` merge, `●` other.
+- **Network commands run without a controlling terminal** (`detach`,
+  `setsid`). `GIT_TERMINAL_PROMPT=0` stops git's own prompts, but ssh and
+  some credential helpers open `/dev/tty` directly for a passphrase or a
+  host key, underneath the UI and racing Bubble Tea for keystrokes.
+  Without a terminal they fail and the error reaches the footer. Cancel
+  kills the whole process group, so ssh dies with git. The test compares
+  session ids, so it means the same with or without a tty.
+- **Push never forces and pull only fast-forwards.** Pull is
+  `pull --ff-only --no-rebase`, so `pull.rebase` can't turn it into a
+  rebase on any git version. Push uses `--porcelain` to tell up to date
+  (`=`), rejected because the remote moved on (`ErrRejected`) and refused
+  by the remote, such as a hook (quoting its `remote:` line), apart. The
+  first push picks the remote like git: `%(push:remotename)`, then
+  origin, then the only remote. Branch state is read fresh by
+  `currentBranch`, not taken from a status that may be seconds old.
 - **Destructive questions confirm only on `y`**, never on `enter`, so a
   stray keypress can't discard work.
 - **The diff cache has a 32 MiB budget** (`maxDiffCacheBytes`) and is cleared
@@ -348,12 +368,16 @@ Released as `v0.3.0`: background status polling, coalesced refreshes,
 cancelled stale loads, a 3× cheaper frame, and the fixes from the
 reliability review.
 
-Unreleased (next: `v0.4.0`): the log and the graph merged into one tab:
+Released as `v0.4.0`: the log and the graph merged into one tab:
 the graph of all branches with hashes, next to the selected commit's
 details and diff. The branch view is no longer a tab but a list opened
 with `b` over files or the log. Two tabs remain: files `1`, log `2`.
 UI polish: one header line per file in diffs, muted directories, graph
 columns aligned, `◉`/`○` nodes and HEAD's line in the accent color.
+
+Unreleased (next: `v0.5.0`): push (`P`) and pull (`p`), in the files and
+log views.
+
 Check `git ls-remote --tags origin` before picking a version; the roadmap
 can lag behind the tags.
 
