@@ -1,25 +1,29 @@
-# gitlume
+# qitlog
 
 A calm, minimal terminal UI for git.
 
-gitlume shows what changed, lets you stage, discard, commit and push it,
+qitlog shows what changed, lets you stage, discard, commit and push it,
 pull, browse the history with a graph of every branch, and switch
 branches. No boxes, no clutter: one accent color, generous spacing, and keybindings you
 can discover with `?`.
 
-![gitlume: browsing changes, viewing a diff, staging, committing, pushing, the log with its graph of all branches and switching branches](docs/preview.svg)
+![qitlog: browsing changes, viewing a diff, staging, committing, pushing, the log with its graph of all branches and switching branches](docs/preview.svg)
 
 ## Install
 
 ```sh
-go install github.com/skinleak/gitlume/cmd/gitlume@latest
+go install github.com/skinleak/qitlog/cmd/qitlog@latest
 ```
+
+qitlog was called gitlume until `v0.7.0`. If you installed it under that
+name, install it again with the command above and delete the old binary
+(`rm "$(go env GOPATH)/bin/gitlume"`).
 
 You need Go 1.27 or newer to build it, and `git` on your `PATH` to run it.
 
 ## Usage
 
-Run `gitlume` anywhere inside a git work tree.
+Run `qitlog` anywhere inside a git work tree.
 
 | Key              | Action                                |
 | ---------------- | ------------------------------------- |
@@ -58,7 +62,7 @@ repositories), so it stays current even in a split or on a second screen.
 
 ## Design
 
-- **Real git, not a reimplementation.** gitlume runs the `git` binary and
+- **Real git, not a reimplementation.** qitlog runs the `git` binary and
   parses its stable porcelain formats. Your config, hooks, and credentials
   behave exactly as they do on the command line.
 - **Never blocks.** Every git command runs in the background. Results that
@@ -82,12 +86,12 @@ repositories), so it stays current even in a split or on a second screen.
 go build ./...        # build
 go test ./...         # unit + integration tests (needs git)
 go vet ./...
-go run ./cmd/gitlume  # run against the current repository
+go run ./cmd/qitlog   # run against the current repository
 go run ./tools/preview  # regenerate docs/preview.svg after UI changes
 ```
 
 ```
-cmd/gitlume/          entry point
+cmd/qitlog/           entry point
 internal/git/         git CLI wrapper and porcelain parsers (no UI)
 internal/ui/          Bubble Tea models: root app, file list, diff, commit prompt, help
 internal/ui/theme/    every color and style

@@ -17,8 +17,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
-	"github.com/skinleak/gitlume/internal/git"
-	"github.com/skinleak/gitlume/internal/ui/theme"
+	"github.com/skinleak/qitlog/internal/git"
+	"github.com/skinleak/qitlog/internal/ui/theme"
 )
 
 func newTestModel(t *testing.T) (Model, string) {

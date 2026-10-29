@@ -1,13 +1,13 @@
 # CLAUDE.md
 
-gitlume is a terminal git client in Go, inspired by lazygit but deliberately
+qitlog is a terminal git client in Go, inspired by lazygit but deliberately
 smaller and calmer. Priorities, in order: **reliability, performance, a clean
 minimal UI, a maintainable codebase**. Do not add features, options, or
 dependencies that were not asked for.
 
 ## How we work
 
-The owner (GitHub `skinleak/gitlume`) asks for features in short, casual
+The owner (GitHub `skinleak/qitlog`) asks for features in short, casual
 messages and often says "you decide". Follow this without being told:
 
 - **Decide design details yourself** within the rules below and say in a
@@ -42,7 +42,7 @@ go build ./...
 go test ./...          # ~5s; integration tests create temp repos and need git
 go vet ./...
 gofmt -l .             # must print nothing
-go run ./cmd/gitlume   # run inside any git repo
+go run ./cmd/qitlog    # run inside any git repo
 go test -run '^$' -bench . ./internal/...   # hot-path benchmarks
 go run ./tools/preview # regenerate docs/preview.svg (README clip)
 ```
@@ -60,7 +60,7 @@ go-git.
 ## Architecture
 
 ```
-cmd/gitlume/main.go      Open repo → warm terminal background query → run tea.Program
+cmd/qitlog/main.go       Open repo → warm terminal background query → run tea.Program
 internal/git/            UI-free git wrapper; everything here is unit-testable
   runner.go              the only place that executes git (fixed env, limits, *Error)
   runner_unix.go         detach: network commands run in their own session (no tty)
@@ -228,7 +228,7 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   the old body and trailers instead of dropping them (`-F` keeps lines
   starting with `#`). A commit its upstream already contains
   (`rev-list --count @{u}..HEAD` is 0) is refused with `ErrAmendPushed`,
-  since gitlume never force-pushes; both checks run fresh in `amendable`,
+  since qitlog never force-pushes; both checks run fresh in `amendable`,
   not from the status. git refuses an amend that leaves the commit empty,
   in a three-line message, which becomes `ErrAmendEmpty`. Test fixtures
   must commit real changes: an `--allow-empty` commit can't be amended.
@@ -342,7 +342,7 @@ tools/preview/           drives the real Model through a script, writes docs/pre
 
 ## Releasing
 
-Users install with `go install .../cmd/gitlume@latest`, which resolves to
+Users install with `go install .../cmd/qitlog@latest`, which resolves to
 the highest `vX.Y.Z` tag. Untagged commits on main never reach them, and the
 Go proxy caches `@latest`, so a release is a tag:
 
@@ -355,7 +355,7 @@ git push origin v0.2.0
 makes it `@latest` for everyone at once. Bump the minor version for
 features and the patch version for fixes; `v0.x` means no compatibility
 promises yet. Tag merged commits on `main` only, after `git pull`, and
-check with `go list -m github.com/skinleak/gitlume@latest` (run outside
+check with `go list -m github.com/skinleak/qitlog@latest` (run outside
 the repo) that the proxy serves the new version.
 
 Never tell users to install `@main`: it ships unreleased work, and the
@@ -427,8 +427,12 @@ changes just aren't committed yet.
 Released as `v0.6.0`: `n` in the branch list creates a branch from the
 selected one and switches to it.
 
-Unreleased (next: `v0.7.0`): `A` amends the last commit with the staged
+Released as `v0.7.0`: `A` amends the last commit with the staged
 changes and an edited subject, keeping its body; refused once pushed.
+
+Unreleased (next: `v0.8.0`): renamed from gitlume to qitlog, including
+the module path (`github.com/skinleak/qitlog`) and the command. The old
+module path stays at `v0.7.0` for good.
 
 Planned before `v1.0.0`, agreed with the owner: staging single hunks from
 the diff pane. After that, fixes and polish only.

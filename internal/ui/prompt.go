@@ -5,8 +5,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/skinleak/gitlume/internal/ui/keys"
-	"github.com/skinleak/gitlume/internal/ui/theme"
+	"github.com/skinleak/qitlog/internal/ui/keys"
+	"github.com/skinleak/qitlog/internal/ui/theme"
 )
 
 // prompt is a single-line input in the footer: the commit message or a new

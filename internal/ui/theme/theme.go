@@ -1,12 +1,12 @@
 // Package theme holds every color and Lip Gloss style used by the UI.
-// Change the look of gitlume here and nowhere else.
+// Change the look of qitlog here and nowhere else.
 package theme
 
 import "github.com/charmbracelet/lipgloss"
 
 // Palette is the small set of colors the whole UI is built from.
 // Colors are ANSI indices, so the terminal's own theme decides the exact
-// shades and gitlume matches the rest of the user's CLI.
+// shades and qitlog matches the rest of the user's CLI.
 type Palette struct {
 	Text    lipgloss.TerminalColor
 	Muted   lipgloss.TerminalColor
@@ -83,7 +83,7 @@ type Styles struct {
 
 	// Branch view, colored like git's own output: current branch green,
 	// ahead green, behind red, commit hashes yellow. Remotes are purple
-	// rather than git's red, which gitlume reserves for removals.
+	// rather than git's red, which qitlog reserves for removals.
 	BranchCurrent lipgloss.Style
 	BranchRemote  lipgloss.Style
 	Ahead         lipgloss.Style

@@ -1,4 +1,4 @@
-// Command gitlume is a calm, minimal terminal UI for git.
+// Command qitlog is a calm, minimal terminal UI for git.
 package main
 
 import (
@@ -10,8 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/skinleak/gitlume/internal/git"
-	"github.com/skinleak/gitlume/internal/ui"
+	"github.com/skinleak/qitlog/internal/git"
+	"github.com/skinleak/qitlog/internal/ui"
 )
 
 func main() {
@@ -22,9 +22,9 @@ func run() int {
 	repo, err := git.Open(context.Background(), ".")
 	if err != nil {
 		if errors.Is(err, git.ErrNotRepo) {
-			err = errors.New("not a git repository (run gitlume inside a git work tree)")
+			err = errors.New("not a git repository (run qitlog inside a git work tree)")
 		}
-		fmt.Fprintln(os.Stderr, "gitlume:", err)
+		fmt.Fprintln(os.Stderr, "qitlog:", err)
 		return 1
 	}
 
@@ -35,7 +35,7 @@ func run() int {
 
 	p := tea.NewProgram(ui.New(repo), tea.WithAltScreen(), tea.WithReportFocus())
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "gitlume:", err)
+		fmt.Fprintln(os.Stderr, "qitlog:", err)
 		return 1
 	}
 	return 0

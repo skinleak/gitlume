@@ -1,4 +1,4 @@
-module github.com/skinleak/gitlume
+module github.com/skinleak/qitlog
 
 go 1.27.3
 

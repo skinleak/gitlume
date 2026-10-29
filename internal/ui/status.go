@@ -7,8 +7,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/skinleak/gitlume/internal/git"
-	"github.com/skinleak/gitlume/internal/ui/theme"
+	"github.com/skinleak/qitlog/internal/git"
+	"github.com/skinleak/qitlog/internal/ui/theme"
 )
 
 // groupOrder is the order sections appear in the file list.

@@ -9,7 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/skinleak/gitlume/internal/git"
+	"github.com/skinleak/qitlog/internal/git"
 )
 
 // diffDebounce delays diff loading while the cursor is moving quickly, so
