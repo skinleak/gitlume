@@ -47,6 +47,11 @@ const (
 	pollMin  = 2 * time.Second
 	pollMax  = time.Minute
 	pollCost = 50
+
+	// infoTimeout is how long an info message stays in the footer before
+	// the key hints come back. Errors stay until the next key: they can
+	// quote a hook's output, which takes longer to read.
+	infoTimeout = 3 * time.Second
 )
 
 // viewKind is the tab selected with the number keys.
@@ -110,6 +115,8 @@ type Model struct {
 	pending      string // what it is doing, shown in the footer until it ends
 	message      string
 	isErr        bool
+	messageSeq   int           // counts messages, so a fade only clears its own
+	infoTimeout  time.Duration // 0 keeps info messages until the next key
 
 	width, height int
 }
@@ -131,13 +138,15 @@ func New(repo *git.Repo) Model {
 		loading:     true, // by Init
 		pollEvery:   pollMin,
 		polling:     true,
+		infoTimeout: infoTimeout,
 	}
 }
 
-// WithoutPolling turns background status checks off, for tools and tests
-// that drive the model synchronously: a poll tick would make them sleep.
+// WithoutPolling turns background status checks and fading messages off,
+// for tools and tests that drive the model synchronously: their ticks
+// would make them sleep. Messages then stay until the next key.
 func (m Model) WithoutPolling() Model {
-	m.polling = false
+	m.polling, m.infoTimeout = false, 0
 	return m
 }
 
@@ -148,8 +157,18 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(loadStatus(m.repo, m.statusSeq, false, m.status), m.nextPoll())
 }
 
-// Update routes messages to handlers.
+// Update routes messages to handlers. An info message shown by any of
+// them fades after infoTimeout.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	seq := m.messageSeq
+	m, cmd := m.update(msg)
+	if m.messageSeq != seq && !m.isErr && m.infoTimeout > 0 {
+		cmd = tea.Batch(cmd, fadeMessage(m.infoTimeout, m.messageSeq))
+	}
+	return m, cmd
+}
+
+func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -177,6 +196,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case logLoadedMsg:
 		return m, m.applyLog(msg)
+	case fadeMsg:
+		if msg.seq == m.messageSeq && !m.isErr {
+			m.message = ""
+		}
+		return m, nil
 	case opDoneMsg:
 		m.busy, m.pending = false, ""
 		m.setMessage(msg.info, msg.err)
@@ -188,7 +212,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.commit.active {
 		return m, m.handleCommitKey(msg)
 	}
@@ -859,10 +883,12 @@ func (m *Model) clearDiffCache() {
 func (m *Model) setMessage(info string, err error) {
 	if err != nil {
 		m.message, m.isErr = sanitize(err.Error()), true
+		m.messageSeq++
 		return
 	}
 	if info != "" {
 		m.message, m.isErr = sanitize(info), false
+		m.messageSeq++
 	}
 }
 

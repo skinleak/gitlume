@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1028,5 +1029,33 @@ func TestPendingStaysUntilDone(t *testing.T) {
 	m = pump(t, m, keyPress("j"))
 	if !strings.HasSuffix(footer(m), "q quit") {
 		t.Errorf("hints did not come back: footer %q", footer(m))
+	}
+}
+
+func TestInfoMessageFades(t *testing.T) {
+	m, _ := newTestModel(t)
+	m.infoTimeout = time.Millisecond
+	m = pump(t, m, keyPress("c")) // nothing staged
+	if strings.Contains(footer(m), "Nothing staged") || !strings.HasSuffix(footer(m), "q quit") {
+		t.Errorf("info message did not fade: footer %q", footer(m))
+	}
+
+	// An older message's fade leaves a newer one alone.
+	m.infoTimeout = 0
+	m = pump(t, m, keyPress("c"))
+	old := m.messageSeq
+	m.setMessage("newer", nil)
+	if m = pump(t, m, fadeMsg{seq: old}); footer(m) != "newer" {
+		t.Errorf("a stale fade cleared a newer message: footer %q", footer(m))
+	}
+
+	// Errors stay until the next key.
+	m.infoTimeout = time.Millisecond
+	m = pump(t, m, opDoneMsg{err: errors.New("hook failed")})
+	if m = pump(t, m, fadeMsg{seq: m.messageSeq}); footer(m) != "hook failed" {
+		t.Errorf("an error faded: footer %q", footer(m))
+	}
+	if m = pump(t, m, keyPress("j")); footer(m) == "hook failed" {
+		t.Error("a key did not clear the error")
 	}
 }
