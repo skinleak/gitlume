@@ -80,7 +80,7 @@ internal/ui/
   graph.go               lane layout and rendering for the log's graph
   commit.go              commit prompt (textinput)
   confirm.go             y/n question guarding destructive operations
-  help.go                help overlay generated from keys.KeyMap
+  help.go                help overlay generated from keys.KeyMap; reflows and scrolls
   theme/                 the ONLY place colors and lipgloss styles are defined
   keys/                  the ONLY place keybindings are defined
 tools/preview/           drives the real Model through a script, writes docs/preview.svg
@@ -267,6 +267,13 @@ tools/preview/           drives the real Model through a script, writes docs/pre
 - **Polling sleeps in `tea.Tick`**, so code that drives the model
   synchronously (tests, `tools/preview`) must use `New(repo).WithoutPolling()`
   and send `pollTickMsg` itself when it wants a poll.
+- **The help screen never cuts a key off.** `help.FullHelpView` with a
+  `Width` drops whole groups behind a `…`, which hid `b` and the tabs at
+  60 columns, so `helpLines` renders each group on its own and puts as
+  many side by side as fit, the rest below. Taller than the window, it
+  scrolls with j/k (`helpOffset`), with the hint kept on the last line.
+  `TestHelpShowsEveryKey` checks every binding can be reached in split
+  windows down to 34×10.
 - **Messages are sanitized in `setMessage`.** Errors quote hook output,
   which is often colored, and a raw escape code would reach the terminal.
 - **Footer hints are ordered by importance.** `Model.hints` drops them from

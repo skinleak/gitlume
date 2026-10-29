@@ -930,3 +930,42 @@ func TestMovingCancelsRunningDiff(t *testing.T) {
 		t.Error("moving on did not stop the previous diff's git process")
 	}
 }
+
+// TestHelpShowsEveryKey checks that every keybinding can be read in the
+// help screen, scrolling if needed, in windows split side by side or one
+// above the other, and that the screen always fits the window.
+func TestHelpShowsEveryKey(t *testing.T) {
+	m, _ := newTestModel(t)
+	for _, size := range [][2]int{{120, 30}, {80, 24}, {60, 24}, {60, 14}, {120, 14}, {44, 16}, {34, 10}} {
+		m = pump(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+		mm := pump(t, m, keyPress("?"))
+		seen := ""
+		for range 40 {
+			v := plainView(mm)
+			lines := strings.Split(v, "\n")
+			if len(lines) != size[1] {
+				t.Errorf("%dx%d: %d lines, want %d", size[0], size[1], len(lines), size[1])
+			}
+			for i, l := range lines {
+				if w := ansi.StringWidth(l); w > size[0] {
+					t.Errorf("%dx%d: line %d is %d wide: %q", size[0], size[1], i, w, l)
+				}
+			}
+			seen += v
+			mm = pump(t, mm, keyPress("j"))
+		}
+		for _, group := range mm.keys.FullHelp() {
+			for _, b := range group {
+				if h := b.Help(); !strings.Contains(seen, h.Key) || !strings.Contains(seen, h.Desc) {
+					t.Errorf("%dx%d: %q %q never shown in help", size[0], size[1], h.Key, h.Desc)
+				}
+			}
+		}
+		if !strings.Contains(seen, "esc") || !mm.showHelp {
+			t.Errorf("%dx%d: no way out shown, or j closed help", size[0], size[1])
+		}
+		if mm = pump(t, mm, keyPress("esc")); mm.showHelp {
+			t.Errorf("%dx%d: esc did not close help", size[0], size[1])
+		}
+	}
+}

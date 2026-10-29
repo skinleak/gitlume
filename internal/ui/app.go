@@ -104,6 +104,7 @@ type Model struct {
 	branchesOpen bool // the branch list covers the view until checkout or esc
 	focus        focusArea
 	showHelp     bool
+	helpOffset   int  // first line of the keybindings shown when they scroll
 	zoomed       bool // the diff fills the body
 	busy         bool // a mutating git command is running
 	message      string
@@ -201,6 +202,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case key.Matches(msg, m.keys.Help, m.promptKeys.Cancel):
 			m.showHelp = false
+		case key.Matches(msg, m.keys.Down):
+			m.scrollHelp(1)
+		case key.Matches(msg, m.keys.Up):
+			m.scrollHelp(-1)
+		case key.Matches(msg, m.keys.ScrollDown):
+			m.scrollHelp(m.bodyHeight() / 2)
+		case key.Matches(msg, m.keys.ScrollUp):
+			m.scrollHelp(-m.bodyHeight() / 2)
 		}
 		return m, nil
 	}
@@ -234,7 +243,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.Quit):
 		return m, tea.Quit
 	case key.Matches(msg, m.keys.Help):
-		m.showHelp = true
+		m.openHelp()
 	case key.Matches(msg, m.keys.Refresh):
 		return m, m.refresh()
 	case key.Matches(msg, m.keys.Focus):
@@ -270,7 +279,7 @@ func (m *Model) handleLogKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, m.keys.Quit):
 		return tea.Quit
 	case key.Matches(msg, m.keys.Help):
-		m.showHelp = true
+		m.openHelp()
 	case key.Matches(msg, m.keys.Refresh):
 		return m.refresh()
 	case key.Matches(msg, m.keys.Focus):
@@ -298,7 +307,7 @@ func (m *Model) handleBranchKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, m.keys.Back):
 		return m.showView(m.view)
 	case key.Matches(msg, m.keys.Help):
-		m.showHelp = true
+		m.openHelp()
 	case key.Matches(msg, m.keys.Refresh):
 		return m.refresh()
 	case key.Matches(msg, m.keys.Down):
@@ -415,7 +424,7 @@ func (m *Model) handleZoomedKey(msg tea.KeyMsg) tea.Cmd {
 	case key.Matches(msg, m.keys.Back, m.keys.Open):
 		m.setZoom(false)
 	case key.Matches(msg, m.keys.Help):
-		m.showHelp = true
+		m.openHelp()
 	case key.Matches(msg, m.keys.Refresh):
 		return m.refresh()
 	case key.Matches(msg, m.keys.Down):
@@ -905,7 +914,7 @@ func (m Model) View() string {
 	bodyH := m.bodyHeight()
 	var body []string
 	if m.showHelp {
-		body = lines(m.helpOverlay(m.innerWidth(), bodyH))
+		body = m.helpOverlay(m.innerWidth(), bodyH)
 	} else {
 		body = m.bodyLines(m.layout())
 	}
