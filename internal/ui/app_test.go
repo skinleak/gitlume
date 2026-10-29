@@ -969,3 +969,64 @@ func TestHelpShowsEveryKey(t *testing.T) {
 		}
 	}
 }
+
+// footer is the last line of the frame.
+func footer(m Model) string {
+	lines := strings.Split(plainView(m), "\n")
+	return strings.TrimSpace(lines[len(lines)-1])
+}
+
+func TestPushAndPull(t *testing.T) {
+	m, dir := newTestModel(t)
+	m = pump(t, m, keyPress("P"))
+	if !m.isErr || !strings.Contains(m.message, "no remote to push to") {
+		t.Errorf("push without a remote: %q", m.message)
+	}
+
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	gitRun(t, dir, "init", "-q", "--bare", "-b", "main", remote)
+	gitRun(t, dir, "remote", "add", "origin", remote)
+	m = pump(t, m, keyPress("P"))
+	if footer(m) != "Pushed main" || m.status.Branch.Upstream != "origin/main" {
+		t.Fatalf("first push: footer %q, upstream %q", footer(m), m.status.Branch.Upstream)
+	}
+	m = pump(t, m, keyPress("P"))
+	if footer(m) != "Nothing to push" {
+		t.Errorf("second push: footer %q", footer(m))
+	}
+
+	// A commit pushed from another clone arrives with p, in the log too.
+	clone := filepath.Join(t.TempDir(), "clone")
+	gitRun(t, dir, "clone", "-q", remote, clone)
+	gitRun(t, clone, "-c", "user.name=Other", "-c", "user.email=o@example.com", "commit", "-q", "--allow-empty", "-m", "from elsewhere")
+	gitRun(t, clone, "push", "-q")
+	m = pump(t, m, keyPress("2"))
+	m = pump(t, m, keyPress("p"))
+	if v := plainView(m); footer(m) != "Pulled main" || !strings.Contains(v, "from elsewhere") {
+		t.Errorf("pull in the log:\n%s", v)
+	}
+	m = pump(t, m, keyPress("p"))
+	if footer(m) != "Already up to date" {
+		t.Errorf("second pull: footer %q", footer(m))
+	}
+}
+
+func TestPendingStaysUntilDone(t *testing.T) {
+	m, _ := newTestModel(t)
+	// The push is "running": its command is never run, so it can't finish.
+	if m.push() == nil || !m.busy {
+		t.Fatal("push did not start")
+	}
+	m = pump(t, m, keyPress("j"))
+	if footer(m) != "Pushing…" {
+		t.Errorf("progress gone after a keypress: footer %q", footer(m))
+	}
+	m = pump(t, m, opDoneMsg{info: "Pushed main"})
+	if footer(m) != "Pushed main" {
+		t.Errorf("after the push: footer %q", footer(m))
+	}
+	m = pump(t, m, keyPress("j"))
+	if !strings.HasSuffix(footer(m), "q quit") {
+		t.Errorf("hints did not come back: footer %q", footer(m))
+	}
+}

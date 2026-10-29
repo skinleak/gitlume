@@ -203,6 +203,19 @@ func runOp(info string, op func(context.Context) error) tea.Cmd {
 	}
 }
 
+// runSync runs a push or pull. Its message names the branch it changed,
+// or says that nothing needed to change.
+func runSync(done, same string, op func(context.Context) (git.SyncResult, error)) tea.Cmd {
+	return func() tea.Msg {
+		res, err := op(context.Background())
+		info := done + " " + res.Branch
+		if res.UpToDate {
+			info = same
+		}
+		return opDoneMsg{info: info, err: err}
+	}
+}
+
 // splitDiff turns patch text into lines that are safe to measure and
 // render. It runs inside the tea.Cmd, off the UI goroutine.
 func splitDiff(text string) []string {

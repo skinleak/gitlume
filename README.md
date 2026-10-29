@@ -2,12 +2,12 @@
 
 A calm, minimal terminal UI for git.
 
-gitlume shows what changed, lets you stage, discard and commit it, browse
-the history with a graph of every branch, and switch branches. No
-boxes, no clutter: one accent color, generous spacing, and keybindings you
+gitlume shows what changed, lets you stage, discard, commit and push it,
+pull, browse the history with a graph of every branch, and switch
+branches. No boxes, no clutter: one accent color, generous spacing, and keybindings you
 can discover with `?`.
 
-![gitlume: browsing changes, viewing a diff, staging, committing, the log with its graph of all branches and switching branches](docs/preview.svg)
+![gitlume: browsing changes, viewing a diff, staging, committing, pushing, the log with its graph of all branches and switching branches](docs/preview.svg)
 
 ## Install
 
@@ -32,6 +32,8 @@ Run `gitlume` anywhere inside a git work tree.
 | `d`              | Discard all changes to the selected file (asks first) |
 | `D`              | Discard all uncommitted changes, including untracked files (asks first) |
 | `c`              | Commit (`enter` to confirm, `esc` to cancel) |
+| `P`              | Push the current branch; its first push sets the upstream |
+| `p`              | Pull: fast-forward the current branch from its upstream |
 | `1` / `2`        | Switch between files and the log: a graph of all branches next to the selected commit's files and diff |
 | `←` / `→`        | Previous / next tab (wraps around)    |
 | `b`              | Open the branch list, from files or the log (`esc` to go back) |
@@ -39,6 +41,14 @@ Run `gitlume` anywhere inside a git work tree.
 | `r`              | Refresh                               |
 | `?`              | Show all keybindings (`j`/`k` scroll them in a small window) |
 | `q`              | Quit                                  |
+
+Push and pull are deliberately safe: push never forces, so a remote with
+new commits refuses it and asks you to pull first, and pull only
+fast-forwards, so it never creates a merge or starts a rebase behind your
+back. They use your remotes, credentials and hooks like `git push` and
+`git pull` do; anything that would need to ask for a password or
+passphrase in the terminal fails with a message instead, so use an ssh
+agent or a credential helper.
 
 Status refreshes after every action, whenever the terminal window regains
 focus, and in the background every few seconds (less often in big
@@ -85,5 +95,5 @@ tools/preview/        records the README clip from the real UI
 
 ## Roadmap
 
-Done: status, diff, stage, discard, commit, the branch list, and the log
-with its graph of all branches.
+Done: status, diff, stage, discard, commit, push and pull, the branch
+list, and the log with its graph of all branches.
