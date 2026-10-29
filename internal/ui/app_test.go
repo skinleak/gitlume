@@ -127,7 +127,7 @@ func TestViewFitsWindow(t *testing.T) {
 	m, _ := newTestModel(t)
 	for _, size := range [][2]int{{100, 30}, {60, 20}, {200, 50}, {30, 8}, {20, 4}, {10, 2}} {
 		m = pump(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm", "branches", "new branch", "log", "log zoom", "log branches"} {
+		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm", "amend", "branches", "new branch", "log", "log zoom", "log branches"} {
 			mm := m
 			switch mode {
 			case "help":
@@ -144,6 +144,8 @@ func TestViewFitsWindow(t *testing.T) {
 				mm = pump(t, mm, keyPress("D"))
 			case "branches":
 				mm = pump(t, mm, keyPress("b"))
+			case "amend":
+				mm = pump(t, mm, keyPress("A"))
 			case "new branch":
 				mm = pump(t, mm, keyPress("b"))
 				mm = pump(t, mm, keyPress("n"))
@@ -1162,5 +1164,44 @@ func TestNewBranch(t *testing.T) {
 	m = pump(t, m, keyPress("enter"))
 	if !m.isErr || !strings.Contains(m.message, "already exists") || m.status.Branch.Head != "x" {
 		t.Errorf("existing name: %q, head %q", m.message, m.status.Branch.Head)
+	}
+}
+
+func TestAmend(t *testing.T) {
+	m, dir := newTestModel(t)
+	m = pump(t, m, keyPress(" ")) // stage a.txt
+	m = pump(t, m, keyPress("A"))
+	if !m.amend.active || m.amend.input.Value() != "init" || !strings.HasPrefix(footer(m), "amend › init") {
+		t.Fatalf("amend prompt: active %v, value %q, footer %q", m.amend.active, m.amend.input.Value(), footer(m))
+	}
+	m = pump(t, m, keyPress("esc"))
+	if m.amend.active {
+		t.Fatal("esc did not close the amend prompt")
+	}
+
+	m = pump(t, m, keyPress("A"))
+	for _, r := range " fixed" {
+		m = pump(t, m, keyPress(string(r)))
+	}
+	m = pump(t, m, keyPress("enter"))
+	if footer(m) != "Amended the last commit" {
+		t.Fatalf("after amend: footer %q", footer(m))
+	}
+	log, err := m.repo.Log(context.Background(), "HEAD", 10)
+	if err != nil || len(log) != 1 || log[0].Subject != "init fixed" {
+		t.Fatalf("log after amend = %+v, %v; want one commit, init fixed", log, err)
+	}
+	if v := plainView(m); strings.Contains(v, "a.txt") || !strings.Contains(v, "b.txt") {
+		t.Errorf("staged a.txt should be in the commit, b.txt still changed:\n%s", v)
+	}
+
+	// Once pushed, the commit is left alone.
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	gitRun(t, dir, "init", "-q", "--bare", "-b", "main", remote)
+	gitRun(t, dir, "remote", "add", "origin", remote)
+	m = pump(t, m, keyPress("P"))
+	m = pump(t, m, keyPress("A"))
+	if m.amend.active || !m.isErr || !strings.Contains(m.message, "already pushed") {
+		t.Errorf("amend of a pushed commit: active %v, message %q", m.amend.active, m.message)
 	}
 }

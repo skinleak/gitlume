@@ -14,6 +14,7 @@ type KeyMap struct {
 	Discard    key.Binding
 	DiscardAll key.Binding
 	Commit     key.Binding
+	Amend      key.Binding
 	Pull       key.Binding
 	Push       key.Binding
 	Focus      key.Binding
@@ -75,6 +76,10 @@ func Default() KeyMap {
 		Commit: key.NewBinding(
 			key.WithKeys("c"),
 			key.WithHelp("c", "commit"),
+		),
+		Amend: key.NewBinding(
+			key.WithKeys("A"),
+			key.WithHelp("A", "amend"),
 		),
 		Pull: key.NewBinding(
 			key.WithKeys("p"),
@@ -161,6 +166,20 @@ func DefaultPrompt() PromptKeyMap {
 	}
 }
 
+// DefaultAmendPrompt returns the amend prompt bindings.
+func DefaultAmendPrompt() PromptKeyMap {
+	return PromptKeyMap{
+		Confirm: key.NewBinding(
+			key.WithKeys("enter"),
+			key.WithHelp("enter", "amend"),
+		),
+		Cancel: key.NewBinding(
+			key.WithKeys("esc"),
+			key.WithHelp("esc", "cancel"),
+		),
+	}
+}
+
 // DefaultBranchPrompt returns the new branch prompt bindings.
 func DefaultBranchPrompt() PromptKeyMap {
 	return PromptKeyMap{
@@ -195,7 +214,7 @@ func DefaultConfirm() ConfirmKeyMap {
 
 // ShortHelp is the one-line hint shown in the footer.
 func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Toggle, k.StageAll, k.Commit, k.Push, k.Discard, k.DiscardAll, k.Open, k.Branches, k.Pull, k.Help, k.Quit}
+	return []key.Binding{k.Toggle, k.StageAll, k.Commit, k.Push, k.Discard, k.DiscardAll, k.Open, k.Branches, k.Pull, k.Amend, k.Help, k.Quit}
 }
 
 // BranchHelp is the footer hint while the branch list is open.
@@ -217,7 +236,7 @@ func (k KeyMap) DiffHelp() []key.Binding {
 func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Focus, k.ScrollUp, k.ScrollDown, k.Open, k.Back},
-		{k.Toggle, k.StageAll, k.Discard, k.DiscardAll, k.Commit, k.Pull, k.Push, k.Refresh},
+		{k.Toggle, k.StageAll, k.Discard, k.DiscardAll, k.Commit, k.Amend, k.Pull, k.Push, k.Refresh},
 		{k.Files, k.Log, k.PrevView, k.NextView, k.Branches, k.Checkout, k.NewBranch, k.Help, k.Quit},
 	}
 }

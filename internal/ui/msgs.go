@@ -76,6 +76,13 @@ type logLoadedMsg struct {
 	err     error
 }
 
+// amendLoadedMsg carries the last commit's subject for the amend prompt,
+// or why it can't be amended.
+type amendLoadedMsg struct {
+	subject string
+	err     error
+}
+
 // opDoneMsg reports the end of a mutating git operation.
 type opDoneMsg struct {
 	info string // shown on success; empty for silent operations
@@ -121,6 +128,13 @@ func loadDiff(ctx context.Context, repo *git.Repo, seq int, c git.Change) tea.Cm
 			heads:     heads,
 		}
 		return diffLoadedMsg{seq: seq, key: keyOf(c), content: content}
+	}
+}
+
+func loadAmend(repo *git.Repo) tea.Cmd {
+	return func() tea.Msg {
+		s, err := repo.AmendSubject(context.Background())
+		return amendLoadedMsg{subject: s, err: err}
 	}
 }
 
