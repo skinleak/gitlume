@@ -32,6 +32,7 @@ Run `gitlume` anywhere inside a git work tree.
 | `d`              | Discard all changes to the selected file (asks first) |
 | `D`              | Discard all uncommitted changes, including untracked files (asks first) |
 | `c`              | Commit (`enter` to confirm, `esc` to cancel) |
+| `A`              | Amend the last commit with the staged changes; edit its subject (a body is kept). Refused once it is pushed |
 | `P`              | Push the current branch; its first push sets the upstream |
 | `p`              | Pull: fast-forward the current branch from its upstream |
 | `1` / `2`        | Switch between files and the log: a graph of all branches next to the selected commit's files and diff |
@@ -96,6 +97,6 @@ tools/preview/        records the README clip from the real UI
 
 ## Roadmap
 
-Done: status, diff, stage, discard, commit, push and pull, the branch
+Done: status, diff, stage, discard, commit and amend, push and pull, the branch
 list with checkout and new branches, and the log with its graph of all
 branches.

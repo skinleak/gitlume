@@ -68,7 +68,7 @@ internal/git/            UI-free git wrapper; everything here is unit-testable
   repo.go                Open/ErrNotRepo, read (10s), write and network (5m) timeouts
   status.go              porcelain v2 -z parser; Status.Changes(group)
   diff.go                per-change diff, capped at MaxDiffBytes
-  ops.go                 Stage, Unstage, StageAll, Commit, Discard, DiscardAll
+  ops.go                 Stage, Unstage, StageAll, Commit, Amend, Discard, DiscardAll
   branches.go            for-each-ref and log parsers; Branches, Log, Graph, Show, Checkout,
                          CreateBranch
   sync.go                Push (porcelain parser, rejections) and Pull (fast-forward only)
@@ -223,6 +223,15 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   branch, so `DiscardAll` needs no special case.
 - **Branch ages are relative to `branchList.now`**, captured when the list
   loads, so `View` never calls `time.Now()` and frames are deterministic.
+- **Amend edits only the subject and refuses a pushed commit.** The prompt
+  is one line, so `Amend` reads `%s%x00%b` and writes the new subject over
+  the old body and trailers instead of dropping them (`-F` keeps lines
+  starting with `#`). A commit its upstream already contains
+  (`rev-list --count @{u}..HEAD` is 0) is refused with `ErrAmendPushed`,
+  since gitlume never force-pushes; both checks run fresh in `amendable`,
+  not from the status. git refuses an amend that leaves the commit empty,
+  in a three-line message, which becomes `ErrAmendEmpty`. Test fixtures
+  must commit real changes: an `--allow-empty` commit can't be amended.
 - **New branches never track their start point** (`switch --no-track -c`).
   A branch made from `origin/main` would otherwise track it, and push
   refuses an upstream with another name, so the first push sets the
@@ -415,11 +424,14 @@ Released as `v0.5.2`: after a checkout the log selects the new HEAD, and
 follows HEAD when it was selected. "Nothing to push" says when the
 changes just aren't committed yet.
 
-Unreleased (next: `v0.6.0`): `n` in the branch list creates a branch
-from the selected one and switches to it.
+Released as `v0.6.0`: `n` in the branch list creates a branch from the
+selected one and switches to it.
 
-Planned before `v1.0.0`, agreed with the owner: amend (`A`) and staging
-single hunks from the diff pane. After that, fixes and polish only.
+Unreleased (next: `v0.7.0`): `A` amends the last commit with the staged
+changes and an edited subject, keeping its body; refused once pushed.
+
+Planned before `v1.0.0`, agreed with the owner: staging single hunks from
+the diff pane. After that, fixes and polish only.
 
 Check `git ls-remote --tags origin` before picking a version; the roadmap
 can lag behind the tags.

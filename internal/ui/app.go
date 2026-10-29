@@ -84,6 +84,7 @@ type Model struct {
 	commits   commitsView
 	log       logList
 	commit    prompt // the commit message
+	amend     prompt // the last commit's subject, to amend
 	newBranch prompt // the name of a branch to create
 	confirm   confirmPrompt
 
@@ -132,6 +133,7 @@ func New(repo *git.Repo) Model {
 		styles:      st,
 		help:        newHelp(st),
 		commit:      newPrompt(st, "commit › ", "Commit message", keys.DefaultPrompt()),
+		amend:       newPrompt(st, "amend › ", "Commit message", keys.DefaultAmendPrompt()),
 		newBranch:   newPrompt(st, "new branch › ", "branch name", keys.DefaultBranchPrompt()),
 		diffCache:   make(map[diffKey]diffContent),
 		commitCache: make(map[string][]git.Commit),
@@ -202,6 +204,8 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 			m.message = ""
 		}
 		return m, nil
+	case amendLoadedMsg:
+		return m, m.openAmend(msg)
 	case opDoneMsg:
 		m.busy, m.pending = false, ""
 		m.setMessage(msg.info, msg.err)
@@ -218,6 +222,8 @@ func (m *Model) activePrompt() *prompt {
 	switch {
 	case m.commit.active:
 		return &m.commit
+	case m.amend.active:
+		return &m.amend
 	case m.newBranch.active:
 		return &m.newBranch
 	}
@@ -227,6 +233,9 @@ func (m *Model) activePrompt() *prompt {
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.commit.active {
 		return m, m.handleCommitKey(msg)
+	}
+	if m.amend.active {
+		return m, m.handleAmendKey(msg)
 	}
 	if m.newBranch.active {
 		return m, m.handleNewBranchKey(msg)
@@ -308,6 +317,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.setZoom(true)
 	case key.Matches(msg, m.keys.Commit):
 		return m, m.openCommit()
+	case key.Matches(msg, m.keys.Amend):
+		return m, loadAmend(m.repo)
 	case key.Matches(msg, m.keys.Pull):
 		return m, m.pull()
 	case key.Matches(msg, m.keys.Push):
@@ -463,6 +474,49 @@ func (m *Model) handleCommitKey(msg tea.KeyMsg) tea.Cmd {
 		})
 	}
 	return m.commit.update(msg)
+}
+
+// openAmend opens the amend prompt with the last commit's subject, or says
+// why it can't be amended. A prompt, question or other view opened while
+// the subject loaded wins.
+func (m *Model) openAmend(msg amendLoadedMsg) tea.Cmd {
+	if msg.err != nil {
+		m.setMessage("", msg.err)
+		return nil
+	}
+	if m.activePrompt() != nil || m.confirm.active || m.view != viewFiles || m.branchesOpen || m.zoomed {
+		return nil
+	}
+	m.amend.input.SetValue(msg.subject)
+	m.amend.input.CursorEnd()
+	return m.amend.open(m.promptInputWidth(&m.amend))
+}
+
+// handleAmendKey amends the last commit with the staged changes and the
+// edited subject on enter.
+func (m *Model) handleAmendKey(msg tea.KeyMsg) tea.Cmd {
+	m.message, m.isErr = "", false
+	switch {
+	case key.Matches(msg, m.amend.keys.Cancel):
+		m.amend.close()
+		return nil
+	case key.Matches(msg, m.amend.keys.Confirm):
+		text := strings.TrimSpace(m.amend.input.Value())
+		if text == "" {
+			m.setMessage("", git.ErrEmptyMessage)
+			return nil
+		}
+		if m.busy {
+			m.setMessage("Still working, try again in a moment", nil)
+			return nil
+		}
+		m.amend.close()
+		repo := m.repo
+		return m.startOp("Amending…", "Amended the last commit", func(ctx context.Context) error {
+			return repo.Amend(ctx, text)
+		})
+	}
+	return m.amend.update(msg)
 }
 
 // openNewBranch asks for the name of a branch to create from the selected
@@ -1007,6 +1061,7 @@ func (m *Model) resize() {
 	}
 	m.help.Width = m.innerWidth()
 	m.commit.input.Width = m.promptInputWidth(&m.commit)
+	m.amend.input.Width = m.promptInputWidth(&m.amend)
 	m.newBranch.input.Width = m.promptInputWidth(&m.newBranch)
 }
 
