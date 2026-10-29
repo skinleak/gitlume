@@ -65,7 +65,7 @@ func run(out string) error {
 	s.drain(s.m.Init())
 	script(s)
 
-	if err := os.WriteFile(out, []byte(renderSVG(s.frames, "gitlume: browsing changes, viewing a diff, staging, committing, the log with its graph of all branches and switching branches", width)), 0o644); err != nil {
+	if err := os.WriteFile(out, []byte(renderSVG(s.frames, "gitlume: browsing changes, viewing a diff, staging, committing, pushing, the log with its graph of all branches and switching branches", width)), 0o644); err != nil {
 		return err
 	}
 	fmt.Printf("wrote %s: %d frames\n", out, len(s.frames))
@@ -90,7 +90,8 @@ func script(s *session) {
 		s.key(string(r), 0.07)
 	}
 	s.frames[len(s.frames)-1].dur = 1.2
-	s.key("enter", 2.6)
+	s.key("enter", 2.2)
+	s.key("P", 2.4)     // push: main is ahead of origin by the new commit
 	s.key("2", 4.0)     // log: every branch's graph, the new commit with its diffstat
 	s.key("j", 2.0)     // the details follow the cursor
 	s.key("b", 2.6)     // the branch list, over the log

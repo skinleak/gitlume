@@ -91,6 +91,7 @@ type invocation struct {
 	stdin   io.Reader
 	limit   int   // max stdout bytes kept; 0 means unlimited
 	okCodes []int // non-zero exit codes that are not errors
+	detach  bool  // run without a controlling terminal (see detach)
 }
 
 // result is the output of a git run.
@@ -115,6 +116,9 @@ func run(ctx context.Context, dir string, inv invocation) (result, error) {
 	cmd.Stdout = stdout
 	cmd.Stderr = &stderr
 	cmd.WaitDelay = waitDelay
+	if inv.detach {
+		detach(cmd)
+	}
 
 	err := cmd.Run()
 	if stdout.truncated {

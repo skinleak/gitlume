@@ -104,8 +104,9 @@ type Model struct {
 	branchesOpen bool // the branch list covers the view until checkout or esc
 	focus        focusArea
 	showHelp     bool
-	zoomed       bool // the diff fills the body
-	busy         bool // a mutating git command is running
+	zoomed       bool   // the diff fills the body
+	busy         bool   // a mutating git command is running
+	pending      string // what it is doing, shown in the footer until it ends
 	message      string
 	isErr        bool
 
@@ -176,7 +177,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case logLoadedMsg:
 		return m, m.applyLog(msg)
 	case opDoneMsg:
-		m.busy = false
+		m.busy, m.pending = false, ""
 		m.setMessage(msg.info, msg.err)
 		return m, m.refresh()
 	}
@@ -259,6 +260,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setZoom(true)
 	case key.Matches(msg, m.keys.Commit):
 		return m, m.openCommit()
+	case key.Matches(msg, m.keys.Pull):
+		return m, m.pull()
+	case key.Matches(msg, m.keys.Push):
+		return m, m.push()
 	}
 	return m, nil
 }
@@ -285,6 +290,10 @@ func (m *Model) handleLogKey(msg tea.KeyMsg) tea.Cmd {
 		return m.moveOrScroll(-1)
 	case key.Matches(msg, m.keys.Open):
 		m.setZoom(true)
+	case key.Matches(msg, m.keys.Pull):
+		return m.pull()
+	case key.Matches(msg, m.keys.Push):
+		return m.push()
 	}
 	return nil
 }
@@ -561,17 +570,32 @@ func (m *Model) openCommit() tea.Cmd {
 	return m.commit.open(m.commitInputWidth())
 }
 
-// startOp runs a mutating git command. Only one runs at a time so commands
-// never contend for the index lock; keys pressed meanwhile are ignored.
+// pull fast-forwards the current branch from its upstream.
+func (m *Model) pull() tea.Cmd {
+	return m.start("Pulling…", runSync("Pulled", "Already up to date", m.repo.Pull))
+}
+
+// push sends the current branch to its upstream, setting one on the first
+// push.
+func (m *Model) push() tea.Cmd {
+	return m.start("Pushing…", runSync("Pushed", "Nothing to push", m.repo.Push))
+}
+
+// startOp runs a mutating git command that reports done when it succeeds.
 func (m *Model) startOp(pending, done string, op func(context.Context) error) tea.Cmd {
+	return m.start(pending, runOp(done, op))
+}
+
+// start runs cmd, a mutating git command that ends with an opDoneMsg. Only
+// one runs at a time so commands never contend for the index lock; keys
+// pressed meanwhile are ignored. pending stays in the footer until it ends,
+// so a slow push is never mistaken for a finished one.
+func (m *Model) start(pending string, cmd tea.Cmd) tea.Cmd {
 	if m.busy {
 		return nil
 	}
-	m.busy = true
-	if pending != "" {
-		m.setMessage(pending, nil)
-	}
-	return runOp(done, op)
+	m.busy, m.pending = true, pending
+	return cmd
 }
 
 // refresh reloads the status and everything shown from it. Only one
@@ -1082,6 +1106,9 @@ func (m Model) footerLine() string {
 	}
 	if m.message != "" {
 		return m.messageView()
+	}
+	if m.pending != "" {
+		return m.styles.Info.Render(m.pending)
 	}
 	if m.zoomed {
 		return m.hints(m.keys.DiffHelp())
