@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"reflect"
@@ -268,5 +269,48 @@ func TestShow(t *testing.T) {
 		if !strings.Contains(d.Text, want) {
 			t.Errorf("Show output missing %q:\n%s", want, d.Text)
 		}
+	}
+}
+
+func TestCreateBranch(t *testing.T) {
+	ctx := context.Background()
+	r := newTestRepo(t)
+	remote := t.TempDir()
+	gitCmd(t, remote, "init", "-q", "--bare")
+	gitCmd(t, r.Root(), "remote", "add", "origin", remote)
+	gitCmd(t, r.Root(), "push", "-q", "-u", "origin", "main")
+	gitCmd(t, r.Root(), "commit", "-q", "--allow-empty", "-m", "local only")
+	writeFile(t, r.Root(), "tracked.txt", "work in progress\n")
+
+	// From HEAD: the work in progress comes along.
+	if err := r.CreateBranch(ctx, "feature", ""); err != nil {
+		t.Fatalf("CreateBranch from HEAD: %v", err)
+	}
+	st := mustStatus(t, r)
+	if st.Branch.Head != "feature" || headSubject(t, r) != "local only" || len(st.Entries) != 1 {
+		t.Errorf("after creating feature: %+v, HEAD %q", st, headSubject(t, r))
+	}
+
+	// From a remote branch: it starts there and tracks nothing, so the
+	// first push sets an upstream of its own name.
+	gitCmd(t, r.Root(), "stash", "-q")
+	if err := r.CreateBranch(ctx, "fix", "refs/remotes/origin/main"); err != nil {
+		t.Fatalf("CreateBranch from origin/main: %v", err)
+	}
+	if st := mustStatus(t, r); st.Branch.Head != "fix" || st.Branch.Upstream != "" || headSubject(t, r) != "init" {
+		t.Errorf("after creating fix from origin/main: %+v, HEAD %q", st.Branch, headSubject(t, r))
+	}
+
+	for name, want := range map[string]string{
+		"main":     "a branch named 'main' already exists",
+		"two word": "is not a valid branch name",
+		"-x":       "is not a valid branch name",
+	} {
+		if err := r.CreateBranch(ctx, name, ""); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("CreateBranch(%q) = %v, want %q", name, err, want)
+		}
+	}
+	if err := r.CreateBranch(ctx, "", ""); !errors.Is(err, ErrEmptyBranchName) {
+		t.Errorf("CreateBranch with no name = %v, want ErrEmptyBranchName", err)
 	}
 }

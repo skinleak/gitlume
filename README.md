@@ -38,6 +38,7 @@ Run `gitlume` anywhere inside a git work tree.
 | `←` / `→`        | Previous / next tab (wraps around)    |
 | `b`              | Open the branch list, from files or the log (`esc` to go back) |
 | `enter` (branches) | Check out the selected branch and go back (a remote branch gets a local tracking branch) |
+| `n` (branches)   | Create a branch from the selected one and switch to it (spaces become dashes) |
 | `r`              | Refresh                               |
 | `?`              | Show all keybindings (`j`/`k` scroll them in a small window) |
 | `q`              | Quit                                  |
@@ -96,4 +97,5 @@ tools/preview/        records the README clip from the real UI
 ## Roadmap
 
 Done: status, diff, stage, discard, commit, push and pull, the branch
-list, and the log with its graph of all branches.
+list with checkout and new branches, and the log with its graph of all
+branches.

@@ -127,7 +127,7 @@ func TestViewFitsWindow(t *testing.T) {
 	m, _ := newTestModel(t)
 	for _, size := range [][2]int{{100, 30}, {60, 20}, {200, 50}, {30, 8}, {20, 4}, {10, 2}} {
 		m = pump(t, m, tea.WindowSizeMsg{Width: size[0], Height: size[1]})
-		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm", "branches", "log", "log zoom", "log branches"} {
+		for _, mode := range []string{"main", "help", "commit", "zoom", "zoom help", "confirm", "branches", "new branch", "log", "log zoom", "log branches"} {
 			mm := m
 			switch mode {
 			case "help":
@@ -144,6 +144,9 @@ func TestViewFitsWindow(t *testing.T) {
 				mm = pump(t, mm, keyPress("D"))
 			case "branches":
 				mm = pump(t, mm, keyPress("b"))
+			case "new branch":
+				mm = pump(t, mm, keyPress("b"))
+				mm = pump(t, mm, keyPress("n"))
 			case "log branches":
 				mm = pump(t, mm, keyPress("2"))
 				mm = pump(t, mm, keyPress("b"))
@@ -1107,5 +1110,57 @@ func TestLogCursorFollowsHead(t *testing.T) {
 	m = pump(t, m, keyPress("r"))
 	if selected() != browsing {
 		t.Errorf("a new commit moved the cursor from %q to %q", browsing, selected())
+	}
+}
+
+func TestNewBranch(t *testing.T) {
+	m, dir := newTestModel(t)
+	gitRun(t, dir, "branch", "base")
+
+	// From the current branch, which the list opens on: work comes along.
+	m = pump(t, m, keyPress("b"))
+	m = pump(t, m, keyPress("n"))
+	if !m.newBranch.active || !strings.HasPrefix(footer(m), "new branch ›") || !strings.Contains(footer(m), "enter create") {
+		t.Fatalf("no prompt for the name: footer %q", footer(m))
+	}
+	for _, r := range "my feature" {
+		m = pump(t, m, keyPress(string(r)))
+	}
+	m = pump(t, m, keyPress("enter"))
+	if m.status.Branch.Head != "my-feature" || m.branchesOpen || footer(m) != "Switched to new branch my-feature" {
+		t.Fatalf("after creating: head %q, list open %v, footer %q", m.status.Branch.Head, m.branchesOpen, footer(m))
+	}
+	if !strings.Contains(plainView(m), "a.txt") {
+		t.Errorf("work in progress lost:\n%s", plainView(m))
+	}
+
+	// From another branch: the prompt names it. esc keeps the draft and
+	// the list.
+	m = pump(t, m, keyPress("b"))
+	m = selectBranch(t, m, "base")
+	m = pump(t, m, keyPress("n"))
+	if !strings.HasPrefix(footer(m), "new branch from base ›") {
+		t.Errorf("prompt does not name the base: footer %q", footer(m))
+	}
+	m = pump(t, m, keyPress("x"))
+	m = pump(t, m, keyPress("esc"))
+	if m.newBranch.active || !m.branchesOpen || m.newBranch.input.Value() != "x" {
+		t.Fatalf("esc: prompt %v, list %v, draft %q", m.newBranch.active, m.branchesOpen, m.newBranch.input.Value())
+	}
+	m = pump(t, m, keyPress("n"))
+	m = pump(t, m, keyPress("enter"))
+	if m.status.Branch.Head != "x" {
+		t.Errorf("head = %q, want x", m.status.Branch.Head)
+	}
+
+	// git's refusal shows; nothing changes.
+	m = pump(t, m, keyPress("b"))
+	m = pump(t, m, keyPress("n"))
+	for _, r := range "base" {
+		m = pump(t, m, keyPress(string(r)))
+	}
+	m = pump(t, m, keyPress("enter"))
+	if !m.isErr || !strings.Contains(m.message, "already exists") || m.status.Branch.Head != "x" {
+		t.Errorf("existing name: %q, head %q", m.message, m.status.Branch.Head)
 	}
 }

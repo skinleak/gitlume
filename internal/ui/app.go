@@ -74,18 +74,18 @@ const (
 type Model struct {
 	repo        *git.Repo
 	keys        keys.KeyMap
-	promptKeys  keys.PromptKeyMap
 	confirmKeys keys.ConfirmKeyMap
 	styles      theme.Styles
 	help        help.Model
 
-	files    fileList
-	diff     diffView
-	branches branchList
-	commits  commitsView
-	log      logList
-	commit   commitPrompt
-	confirm  confirmPrompt
+	files     fileList
+	diff      diffView
+	branches  branchList
+	commits   commitsView
+	log       logList
+	commit    prompt // the commit message
+	newBranch prompt // the name of a branch to create
+	confirm   confirmPrompt
 
 	status    git.Status // the last one applied, for polls to compare with
 	statusSeq int
@@ -105,18 +105,19 @@ type Model struct {
 	commitReq   request
 	commitCache map[string][]git.Commit // by full ref
 
-	view         viewKind
-	branchesOpen bool // the branch list covers the view until checkout or esc
-	focus        focusArea
-	showHelp     bool
-	helpOffset   int    // first line of the keybindings shown when they scroll
-	zoomed       bool   // the diff fills the body
-	busy         bool   // a mutating git command is running
-	pending      string // what it is doing, shown in the footer until it ends
-	message      string
-	isErr        bool
-	messageSeq   int           // counts messages, so a fade only clears its own
-	infoTimeout  time.Duration // 0 keeps info messages until the next key
+	view          viewKind
+	branchesOpen  bool   // the branch list covers the view until checkout or esc
+	newBranchFrom string // the full ref a new branch starts at; empty is HEAD
+	focus         focusArea
+	showHelp      bool
+	helpOffset    int    // first line of the keybindings shown when they scroll
+	zoomed        bool   // the diff fills the body
+	busy          bool   // a mutating git command is running
+	pending       string // what it is doing, shown in the footer until it ends
+	message       string
+	isErr         bool
+	messageSeq    int           // counts messages, so a fade only clears its own
+	infoTimeout   time.Duration // 0 keeps info messages until the next key
 
 	width, height int
 }
@@ -127,11 +128,11 @@ func New(repo *git.Repo) Model {
 	return Model{
 		repo:        repo,
 		keys:        keys.Default(),
-		promptKeys:  keys.DefaultPrompt(),
 		confirmKeys: keys.DefaultConfirm(),
 		styles:      st,
 		help:        newHelp(st),
-		commit:      newCommitPrompt(st),
+		commit:      newPrompt(st, "commit › ", "Commit message", keys.DefaultPrompt()),
+		newBranch:   newPrompt(st, "new branch › ", "branch name", keys.DefaultBranchPrompt()),
 		diffCache:   make(map[diffKey]diffContent),
 		commitCache: make(map[string][]git.Commit),
 		log:         logList{limit: logPage},
@@ -206,15 +207,29 @@ func (m Model) update(msg tea.Msg) (Model, tea.Cmd) {
 		m.setMessage(msg.info, msg.err)
 		return m, m.refresh()
 	}
-	if m.commit.active {
-		return m, m.commit.update(msg)
+	if p := m.activePrompt(); p != nil {
+		return m, p.update(msg)
 	}
 	return m, nil
+}
+
+// activePrompt is the open prompt, if any.
+func (m *Model) activePrompt() *prompt {
+	switch {
+	case m.commit.active:
+		return &m.commit
+	case m.newBranch.active:
+		return &m.newBranch
+	}
+	return nil
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	if m.commit.active {
 		return m, m.handleCommitKey(msg)
+	}
+	if m.newBranch.active {
+		return m, m.handleNewBranchKey(msg)
 	}
 	if m.confirm.active {
 		return m, m.handleConfirmKey(msg)
@@ -225,7 +240,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		switch {
 		case key.Matches(msg, m.keys.Quit):
 			return m, tea.Quit
-		case key.Matches(msg, m.keys.Help, m.promptKeys.Cancel):
+		case key.Matches(msg, m.keys.Help, m.keys.Back):
 			m.showHelp = false
 		case key.Matches(msg, m.keys.Down):
 			m.scrollHelp(1)
@@ -357,6 +372,8 @@ func (m *Model) handleBranchKey(msg tea.KeyMsg) tea.Cmd {
 		m.commits.scroll(-m.commits.height / 2)
 	case key.Matches(msg, m.keys.Checkout):
 		return m.checkoutSelected()
+	case key.Matches(msg, m.keys.NewBranch):
+		return m.openNewBranch()
 	}
 	return nil
 }
@@ -424,10 +441,10 @@ func (m *Model) checkoutSelected() tea.Cmd {
 func (m *Model) handleCommitKey(msg tea.KeyMsg) tea.Cmd {
 	m.message, m.isErr = "", false
 	switch {
-	case key.Matches(msg, m.promptKeys.Cancel):
+	case key.Matches(msg, m.commit.keys.Cancel):
 		m.commit.close()
 		return nil
-	case key.Matches(msg, m.promptKeys.Confirm):
+	case key.Matches(msg, m.commit.keys.Confirm):
 		text := strings.TrimSpace(m.commit.input.Value())
 		if text == "" {
 			m.setMessage("", git.ErrEmptyMessage)
@@ -446,6 +463,47 @@ func (m *Model) handleCommitKey(msg tea.KeyMsg) tea.Cmd {
 		})
 	}
 	return m.commit.update(msg)
+}
+
+// openNewBranch asks for the name of a branch to create from the selected
+// one; the list opens on the current branch, so that is HEAD by default.
+func (m *Model) openNewBranch() tea.Cmd {
+	m.newBranchFrom, m.newBranch.label = "", "new branch › "
+	if b, ok := m.branches.selected(); ok && !b.Current {
+		m.newBranchFrom = b.Ref()
+		m.newBranch.label = "new branch from " + sanitize(b.Name) + " › "
+	}
+	return m.newBranch.open(m.promptInputWidth(&m.newBranch))
+}
+
+// handleNewBranchKey creates the branch on enter and switches to it, back
+// in the view beneath the list. Spaces become dashes, which git would
+// refuse in a name; other invalid names get git's own explanation.
+func (m *Model) handleNewBranchKey(msg tea.KeyMsg) tea.Cmd {
+	m.message, m.isErr = "", false
+	switch {
+	case key.Matches(msg, m.newBranch.keys.Cancel):
+		m.newBranch.close()
+		return nil
+	case key.Matches(msg, m.newBranch.keys.Confirm):
+		name := strings.Join(strings.Fields(m.newBranch.input.Value()), "-")
+		if name == "" {
+			m.setMessage("", git.ErrEmptyBranchName)
+			return nil
+		}
+		if m.busy {
+			m.setMessage("Still working, try again in a moment", nil)
+			return nil
+		}
+		m.newBranch.close()
+		m.newBranch.input.Reset()
+		m.branchesOpen = false
+		repo, from := m.repo, m.newBranchFrom
+		return m.startOp("", "Switched to new branch "+sanitize(name), func(ctx context.Context) error {
+			return repo.CreateBranch(ctx, name, from)
+		})
+	}
+	return m.newBranch.update(msg)
 }
 
 // handleZoomedKey handles keys while the diff is fullscreen. Only viewing
@@ -600,7 +658,7 @@ func (m *Model) openCommit() tea.Cmd {
 		m.setMessage("Nothing staged to commit", nil)
 		return nil
 	}
-	return m.commit.open(m.commitInputWidth())
+	return m.commit.open(m.promptInputWidth(&m.commit))
 }
 
 // pull fast-forwards the current branch from its upstream.
@@ -667,7 +725,7 @@ func (m Model) nextPoll() tea.Cmd {
 // skips a tick while anything else is going on, or right after a refresh.
 func (m *Model) poll(now time.Time) tea.Cmd {
 	next := m.nextPoll()
-	if m.loading || m.busy || m.commit.active || m.confirm.active || now.Sub(m.statusAt) < m.pollEvery/2 {
+	if m.loading || m.busy || m.activePrompt() != nil || m.confirm.active || now.Sub(m.statusAt) < m.pollEvery/2 {
 		return next
 	}
 	return tea.Batch(next, m.loadStatus(true))
@@ -948,15 +1006,16 @@ func (m *Model) resize() {
 		m.diff.setHeight(l.diffH)
 	}
 	m.help.Width = m.innerWidth()
-	m.commit.input.Width = m.commitInputWidth()
+	m.commit.input.Width = m.promptInputWidth(&m.commit)
+	m.newBranch.input.Width = m.promptInputWidth(&m.newBranch)
 }
 
-// commitInputWidth leaves room on the footer line for the prompt label
-// and its key hints. textinput renders one cell more than its Width for
-// the cursor, hence the extra 1.
-func (m Model) commitInputWidth() int {
-	hint := ansi.StringWidth(m.help.ShortHelpView(m.promptKeys.ShortHelp()))
-	return max(1, m.innerWidth()-ansi.StringWidth(commitLabel)-hint-paneGap-1)
+// promptInputWidth leaves room on the footer line for p's label and its
+// key hints. textinput renders one cell more than its Width for the
+// cursor, hence the extra 1.
+func (m Model) promptInputWidth(p *prompt) int {
+	hint := ansi.StringWidth(m.help.ShortHelpView(p.keys.ShortHelp()))
+	return max(1, m.innerWidth()-ansi.StringWidth(p.label)-hint-paneGap-1)
 }
 
 // View renders the whole screen. It is assembled line by line from parts
@@ -1126,9 +1185,9 @@ func (m Model) footerView() string {
 }
 
 func (m Model) footerLine() string {
-	if m.commit.active {
-		prompt := m.commit.view(m.styles)
-		hint := m.help.ShortHelpView(m.promptKeys.ShortHelp())
+	if p := m.activePrompt(); p != nil {
+		prompt := p.view(m.styles)
+		hint := m.help.ShortHelpView(p.keys.ShortHelp())
 		if m.message != "" {
 			hint = m.messageView()
 		}
