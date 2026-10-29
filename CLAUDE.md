@@ -430,7 +430,7 @@ selected one and switches to it.
 Released as `v0.7.0`: `A` amends the last commit with the staged
 changes and an edited subject, keeping its body; refused once pushed.
 
-Unreleased (next: `v0.8.0`): renamed from gitlume to qitlog, including
+Released as `v0.8.0`: renamed from gitlume to qitlog, including
 the module path (`github.com/skinleak/qitlog`) and the command. The old
 module path stays at `v0.7.0` for good.
 
