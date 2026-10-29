@@ -21,16 +21,22 @@ type logList struct {
 	limit  int     // commits requested from git; grows by logPage
 	loaded bool
 	more   bool
+	branch string // HEAD's branch when the list was last set
 }
 
-// set replaces the commits, keeping the cursor on the same commit.
-func (l *logList) set(cs []git.Commit, lanes [][]graphCell, more bool) {
+// set replaces the commits, keeping the cursor on the same commit. The
+// cursor goes to HEAD instead after HEAD switched to another branch, and
+// follows HEAD when HEAD was selected, so a pull or a new commit doesn't
+// leave it behind. Otherwise HEAD moving never moves the cursor: someone
+// browsing old history keeps their place.
+func (l *logList) set(cs []git.Commit, lanes [][]graphCell, more bool, branch string) {
 	prev, hadPrev := l.selected()
+	toHead := l.loaded && branch != l.branch || hadPrev && isHead(prev.Refs)
 	l.setItems(cs, func(a, b git.Commit) bool { return true })
-	l.lanes, l.more, l.loaded = lanes, more, true
+	l.lanes, l.more, l.loaded, l.branch = lanes, more, true, branch
 	cursor := 0
 	for i, c := range cs {
-		if hadPrev && c.Hash == prev.Hash {
+		if toHead && isHead(c.Refs) || !toHead && hadPrev && c.Hash == prev.Hash {
 			cursor = i
 			break
 		}

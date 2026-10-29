@@ -991,8 +991,9 @@ func TestPushAndPull(t *testing.T) {
 	if footer(m) != "Pushed main" || m.status.Branch.Upstream != "origin/main" {
 		t.Fatalf("first push: footer %q, upstream %q", footer(m), m.status.Branch.Upstream)
 	}
+	// The edits in the work tree are not commits: say so.
 	m = pump(t, m, keyPress("P"))
-	if footer(m) != "Nothing to push" {
+	if footer(m) != "Nothing to push: your changes aren't committed yet" {
 		t.Errorf("second push: footer %q", footer(m))
 	}
 
@@ -1009,6 +1010,13 @@ func TestPushAndPull(t *testing.T) {
 	m = pump(t, m, keyPress("p"))
 	if footer(m) != "Already up to date" {
 		t.Errorf("second pull: footer %q", footer(m))
+	}
+
+	gitRun(t, dir, "stash", "-q")
+	m = pump(t, m, keyPress("r"))
+	m = pump(t, m, keyPress("P"))
+	if footer(m) != "Nothing to push" {
+		t.Errorf("push of a clean tree: footer %q", footer(m))
 	}
 }
 
@@ -1057,5 +1065,47 @@ func TestInfoMessageFades(t *testing.T) {
 	}
 	if m = pump(t, m, keyPress("j")); footer(m) == "hook failed" {
 		t.Error("a key did not clear the error")
+	}
+}
+
+func TestLogCursorFollowsHead(t *testing.T) {
+	m, dir := newTestModel(t)
+	gitRun(t, dir, "stash", "-q")
+	gitRun(t, dir, "branch", "feat")
+	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "main work")
+	gitRun(t, dir, "switch", "-q", "feat")
+	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "feat work")
+	gitRun(t, dir, "switch", "-q", "main")
+	m = pump(t, m, keyPress("r"))
+	m = pump(t, m, keyPress("2"))
+	selected := func() string { c, _ := m.log.selected(); return c.Subject }
+
+	// A checkout from the branch list selects the new HEAD, wherever the
+	// cursor was.
+	for range m.log.items {
+		m = pump(t, m, keyPress("j"))
+	}
+	m = pump(t, m, keyPress("b"))
+	m = selectBranch(t, m, "feat")
+	m = pump(t, m, keyPress("enter"))
+	if m.status.Branch.Head != "feat" || selected() != "feat work" {
+		t.Fatalf("after checking out feat: head %q, selected %q", m.status.Branch.Head, selected())
+	}
+
+	// With HEAD selected, the cursor follows a new commit on the branch.
+	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "more feat")
+	m = pump(t, m, keyPress("r"))
+	if selected() != "more feat" {
+		t.Errorf("cursor did not follow HEAD: selected %q", selected())
+	}
+
+	// Browsing elsewhere, a new commit doesn't take the cursor away.
+	m = pump(t, m, keyPress("j"))
+	m = pump(t, m, keyPress("j"))
+	browsing := selected()
+	gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", "even more")
+	m = pump(t, m, keyPress("r"))
+	if selected() != browsing {
+		t.Errorf("a new commit moved the cursor from %q to %q", browsing, selected())
 	}
 }

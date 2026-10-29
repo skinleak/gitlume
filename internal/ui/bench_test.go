@@ -93,7 +93,7 @@ func BenchmarkLogMoveAndView(b *testing.B) {
 	cs := wideHistory(10 * logPage)
 	var l logList
 	l.setHeight(50)
-	l.set(cs, layoutGraph(cs), false)
+	l.set(cs, layoutGraph(cs), false, "")
 	b.ReportAllocs()
 	for b.Loop() {
 		if !l.move(1) {

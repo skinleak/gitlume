@@ -132,6 +132,10 @@ tools/preview/           drives the real Model through a script, writes docs/pre
    diff pane through the same `requestDiff`/`diffCache` path as file
    diffs, keyed by `diffKey{commit: hash}`; `diffTarget()` decides what
    the pane shows. `Model.history()` is the log's list while it is shown.
+   A reload keeps the cursor on its commit, except that it goes to HEAD
+   when HEAD's branch changed (`logList.branch`) and follows HEAD when
+   HEAD was selected; HEAD moving otherwise never moves the cursor, so a
+   commit made elsewhere doesn't pull someone away from old history.
 7. Mutations go through `start` (`startOp` for plain ones, `runSync` for
    push and pull). Only one runs at a time (`busy`), so commands never
    fight over `index.lock`. Its `pending` text ("Pushing…") stays in the
@@ -398,6 +402,10 @@ don't fit side by side go below each other, and it scrolls with j/k.
 
 Released as `v0.5.1`: info messages fade after 3 seconds so the
 key hints come back; errors still stay until the next key.
+
+Unreleased (next: `v0.5.2`): after a checkout the log selects the new
+HEAD, and follows HEAD when it was selected. "Nothing to push" says when
+the changes just aren't committed yet.
 
 Check `git ls-remote --tags origin` before picking a version; the roadmap
 can lag behind the tags.

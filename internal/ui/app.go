@@ -610,8 +610,14 @@ func (m *Model) pull() tea.Cmd {
 
 // push sends the current branch to its upstream, setting one on the first
 // push.
+// Pushing right after editing, before committing, is a common slip, so the
+// message says why there was nothing to push.
 func (m *Model) push() tea.Cmd {
-	return m.start("Pushing…", runSync("Pushed", "Nothing to push", m.repo.Push))
+	same := "Nothing to push"
+	if len(m.files.items) > 0 {
+		same = "Nothing to push: your changes aren't committed yet"
+	}
+	return m.start("Pushing…", runSync("Pushed", same, m.repo.Push))
 }
 
 // startOp runs a mutating git command that reports done when it succeeds.
@@ -741,7 +747,7 @@ func (m *Model) applyLog(msg logLoadedMsg) tea.Cmd {
 		m.setMessage("", msg.err)
 		return nil
 	}
-	l.set(msg.commits, msg.lanes, len(msg.commits) == msg.limit)
+	l.set(msg.commits, msg.lanes, len(msg.commits) == msg.limit, m.status.Branch.Head)
 	if m.view != viewLog || m.branchesOpen {
 		return nil
 	}
