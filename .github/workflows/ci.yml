@@ -1,0 +1,34 @@
+# Runs the definition of done (see CLAUDE.md) on every pull request and on
+# main: formatting, vet, build and the tests, which drive real git in temp
+# repositories. macOS runs too, since terminals and process sessions differ
+# there, and Windows is cross-compiled so unix-only code can't break it.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt-ed:"; echo "$unformatted"; exit 1
+          fi
+      - run: go vet ./...
+      - run: go build ./...
+      - name: Build for Windows
+        run: GOOS=windows go build ./...
+      - run: go test ./...

@@ -48,7 +48,8 @@ go run ./tools/preview # regenerate docs/preview.svg (README clip)
 ```
 
 Definition of done for any change: `gofmt -l .` is empty and `go vet`,
-`go build` and `go test` all pass.
+`go build` and `go test` all pass. CI (`ci.yml`) checks the same on
+Linux and macOS for every pull request; don't merge a red one.
 
 ## Stack
 
@@ -87,7 +88,8 @@ internal/ui/
   theme/                 the ONLY place colors and lipgloss styles are defined
   keys/                  the ONLY place keybindings are defined
 tools/preview/           drives the real Model through a script, writes docs/preview.svg
-.github/workflows/       release.yml: publishes pushed version tags to the Go proxy
+.github/workflows/       ci.yml: fmt, vet, build (+ Windows) and tests on Linux and macOS
+                         for every PR; release.yml: publishes version tags to the Go proxy
 ```
 
 ### Data flow
@@ -393,7 +395,7 @@ Released as `v0.5.0`: push (`P`) and pull (`p`), in the files and log
 views. The help screen shows every key in small windows: groups that
 don't fit side by side go below each other, and it scrolls with j/k.
 
-Unreleased (next: `v0.5.1`): info messages fade after 3 seconds so the
+Released as `v0.5.1`: info messages fade after 3 seconds so the
 key hints come back; errors still stay until the next key.
 
 Check `git ls-remote --tags origin` before picking a version; the roadmap
