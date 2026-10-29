@@ -150,6 +150,9 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   `View`.
 - **Errors never crash the app.** Send them to `setMessage("", err)` so they
   appear in the footer status line. They clear on the next key press.
+  Info messages (`setMessage(info, nil)`) also fade after `infoTimeout`
+  (3 s), so the key hints come back; errors don't, since they can quote
+  hook output that takes longer to read.
 - **Colors and styles live only in `theme`; bindings live only in `keys`.**
   Add a binding to `KeyMap` and to `FullHelp()`, and the help overlay picks
   it up.
@@ -284,9 +287,13 @@ tools/preview/           drives the real Model through a script, writes docs/pre
   views doesn't resize. Only list widths differ between views (the log's
   list gets `logListShare` of the width for its lanes, hash and refs), and
   they are applied in `View`, so the heights `resize` sets fit every view.
-- **Polling sleeps in `tea.Tick`**, so code that drives the model
-  synchronously (tests, `tools/preview`) must use `New(repo).WithoutPolling()`
-  and send `pollTickMsg` itself when it wants a poll.
+- **Polling and fading messages sleep in `tea.Tick`**, so code that drives
+  the model synchronously (tests, `tools/preview`) must use
+  `New(repo).WithoutPolling()`, which turns both off, and send `pollTickMsg`
+  or `fadeMsg` itself when it wants one. `Update` schedules the fade for
+  any handler that set a message (`messageSeq` changed), so `setMessage`
+  needs no `tea.Cmd` of its own, and a stale fade never clears a newer
+  message.
 - **The help screen never cuts a key off.** `help.FullHelpView` with a
   `Width` drops whole groups behind a `…`, which hid `b` and the tabs at
   60 columns, so `helpLines` renders each group on its own and puts as
@@ -382,9 +389,12 @@ with `b` over files or the log. Two tabs remain: files `1`, log `2`.
 UI polish: one header line per file in diffs, muted directories, graph
 columns aligned, `◉`/`○` nodes and HEAD's line in the accent color.
 
-Unreleased (next: `v0.5.0`): push (`P`) and pull (`p`), in the files and
-log views. The help screen shows every key in small windows: groups that
+Released as `v0.5.0`: push (`P`) and pull (`p`), in the files and log
+views. The help screen shows every key in small windows: groups that
 don't fit side by side go below each other, and it scrolls with j/k.
+
+Unreleased (next: `v0.5.1`): info messages fade after 3 seconds so the
+key hints come back; errors still stay until the next key.
 
 Check `git ls-remote --tags origin` before picking a version; the roadmap
 can lag behind the tags.

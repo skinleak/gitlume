@@ -29,6 +29,9 @@ type statusLoadedMsg struct {
 	err       error
 }
 
+// fadeMsg clears info message seq, if it is still shown.
+type fadeMsg struct{ seq int }
+
 // pollTickMsg asks for a background status check.
 type pollTickMsg struct{ at time.Time }
 
@@ -93,6 +96,10 @@ func loadStatus(repo *git.Repo, seq int, poll bool, prev git.Status) tea.Cmd {
 
 func pollTick(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(t time.Time) tea.Msg { return pollTickMsg{at: t} })
+}
+
+func fadeMessage(after time.Duration, seq int) tea.Cmd {
+	return tea.Tick(after, func(time.Time) tea.Msg { return fadeMsg{seq: seq} })
 }
 
 func diffTick(seq int) tea.Cmd {
